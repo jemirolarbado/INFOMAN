@@ -151,7 +151,8 @@ async function loadApp() {
     .single();
 
   if (error || !profile) {
-    alert("Could not load your profile. Did you run schema.sql in Supabase?");
+    alert("Could not load your profile. Run schema.sql in the Supabase SQL Editor first.\n\n" +
+      (error ? error.message : "No profile record was returned for this account."));
     await db.auth.signOut();
     return;
   }
