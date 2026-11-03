@@ -1,5 +1,5 @@
-const SUPABASE_URL = "https://YOUR-PROJECT-ID.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+const SUPABASE_URL = "https://pfgwavzauqqbrcmgqjou.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_s4lDEuo5PDkgkMpjdqV7aA_mRoAomRI";
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const RESTRICTED_MODULES = ["hr", "reports"];
