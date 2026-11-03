@@ -1,0 +1,33 @@
+S1-UIX-05: Usability Review & Fix List (Sprint 1)
+
+Task ID: S1-UIX-05  
+Role: UI/UX Designer  
+Scope: Design Compliance & Usability Audit of Built Screens vs. Student Guide Specs & Hi-Fi Mockups  
+
+1. Design System & Accessibility Audit
+
+-Color Tokens & Contrast: Primary Teal 700 (`#0B6E64`) and Accent Coral 700 (`#C9432C`) pass WCAG AA contrast standards against light backgrounds (`#FFFFFF`, `#DDF1EE`).
+-Typography Scale: Verified visual hierarchy across Display (Sora 700 / 40px), Headings (Sora 600 / 24px), and Body (DM Sans 400 / 16px).
+-Form Controls: Input focus states correctly display a teal border highlight with soft focus ring.
+
+ 2. Developer Audit & Fix List
+
+Fix Item 1: Role-Based Access Control (RBAC) & System Security
+-Audit Finding (§1.2 & §3.8): Admins can manage standard Users only; Superadmin accounts must remain hidden from Admin views.
+-Developer Requirement:
+-Ensure Superadmin accounts do not show up in the User Management list when an Admin is logged in.
+-Hiding action buttons in the front-end is a courtesy; the backend server MUST enforce role checks on every API request.
+
+Fix Item 2: Soft Delete, Status Badges & Stamp Audit
+-Audit Finding (§2.3): Soft-deleted rows (`status = Inactive`) must remain in the database to prevent breaking foreign keys (e.g., sales referencing deleted customers).
+-Developer Requirement:
+  -Admin / Superadmin View: Show all rows (Active and Inactive). Inactive rows must be shaded with a red `Inactive` badge (`#B42318`), direct Audit Stamp text, and a **Restore** button replacing Edit/Delete.
+  -User View: Filter out `status = Inactive` rows on the backend (`WHERE status = 'Active'`). Hide the **Status** and **Stamp** columns completely from standard User accounts.
+
+Fix Item 3: Navigation & Active Route Indicator
+-Audit Finding (§3.2): Active sidebar navigation states.
+-Developer Requirement: Active sidebar links must feature background fill `#DDF1EE` with icon/text colored `#0B6E64`. Modules restricted by an Admin must be greyed out or removed from the menu.
+
+Sign-Off Criteria
+- Database audit stamp tracks latest action (`CREATED`, `EDITED`, `DELETED`), user, and timestamp.
+- Responsive container layouts conform strictly to Sprint 1 mockups.
