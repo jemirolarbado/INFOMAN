@@ -267,6 +267,7 @@
       '</div>' +
       '<div class="field"><label for="r-email">Email address</label><input class="input" id="r-email" type="email" autocomplete="email" required></div>' +
       '<div class="field"><label for="r-pw">Password</label><input class="input" id="r-pw" type="password" placeholder="At least 6 characters" required></div>' +
+      '<div class="field"><label for="r-repw">Confirm password</label><input class="input" id="r-repw" type="password" placeholder="Re-enter password" required></div>' +
       '<div class="msg msg-err" id="form-error" role="alert" hidden></div>' +
       '<button type="submit" class="btn btn-primary btn-block">Register</button>' +
       '<div class="divider">or</div>' + googleBtn() +
@@ -649,7 +650,6 @@
       // 1. Authenticate against Supabase Auth service
       var authRes = await db.auth.signInWithPassword({ email: email, password: pw });
       if (authRes.error) {
-        // Fallback demo account login check if Auth service user isn't created yet
         var localMatch = S.users.find(function(x) { return x.email.toLowerCase() === email; });
         if (!localMatch) return formError('Invalid email or password.');
       }
@@ -684,18 +684,19 @@
 
   async function doRegister() {
     var first = val('r-first'), last = val('r-last'), email = val('r-email').toLowerCase();
-    var pwEl = document.getElementById('r-pw');
-    var password = pwEl ? pwEl.value : '';
+    var pw = document.getElementById('r-pw') ? document.getElementById('r-pw').value : '';
+    var repw = document.getElementById('r-repw') ? document.getElementById('r-repw').value : '';
 
     if (!first || !last) return formError('Enter your first and last name.');
     if (!EMAIL_RE.test(email)) return formError('Enter a valid email address.');
-    if (!password || password.length < 6) return formError('Password must be at least 6 characters.');
+    if (!pw || pw.length < 6) return formError('Password must be at least 6 characters.');
+    if (pw !== repw) return formError('Passwords do not match.');
 
     if (db) {
       // Register credentials with Supabase Auth
       var authRes = await db.auth.signUp({
         email: email,
-        password: password,
+        password: pw,
         options: { data: { first: first, last: last } }
       });
 
@@ -925,3 +926,5 @@
   });
 
 })(window);
+
+```
