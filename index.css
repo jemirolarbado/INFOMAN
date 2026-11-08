@@ -181,11 +181,27 @@ ul { list-style: none; margin: 0; padding: 0; }
 .role-cards div { background: rgba(255, 255, 255, .10); border-radius: 14px; padding: 14px 16px; }
 .role-cards b { display: block; font-size: 15px; }
 .role-cards span { font-size: 13px; color: #CFE9E5; }
-.auth-right { flex: 1 1 420px; padding: 48px 32px; display: flex; align-items: center; justify-content: center; }
+.auth-right { 
+  flex: 1 1 420px; 
+  padding: 32px 24px; 
+  display: flex; 
+  align-items: flex-start; 
+  justify-content: center; 
+  overflow-y: auto; 
+}
+
 .auth-card {
-  width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--line);
-  border-radius: 24px; padding: 36px; display: flex; flex-direction: column; gap: 18px;
+  width: 100%; 
+  max-width: 420px; 
+  background: var(--card); 
+  border: 1px solid var(--line);
+  border-radius: 24px; 
+  padding: 28px 24px; 
+  display: flex; 
+  flex-direction: column; 
+  gap: 14px;
   box-shadow: 0 12px 32px rgba(16, 32, 30, .06);
+  margin: auto 0;
 }
 .auth-card h2 { font-size: 26px; font-weight: 700; }
 .auth-card .sub { font-size: 15px; color: var(--mute); margin-top: 6px; }
