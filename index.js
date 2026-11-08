@@ -643,15 +643,15 @@
 
   // --- Real Supabase Auth Handlers ---
   async function doLogin() {
-    var email = val('l-email').toLowerCase(), pw = document.getElementById('l-pw').value;
+    var email = val('l-email').toLowerCase(), pw = document.getElementById('l-pw') ? document.getElementById('l-pw').value : '';
     if (!email || !pw) return formError('Enter your email and password.');
 
     if (db) {
       // 1. Authenticate against Supabase Auth service
       var authRes = await db.auth.signInWithPassword({ email: email, password: pw });
       if (authRes.error) {
-        var localMatch = S.users.find(function(x) { return x.email.toLowerCase() === email; });
-        if (!localMatch) return formError('Invalid email or password.');
+        // Strictly reject login on invalid credentials
+        return formError('Invalid email or password.');
       }
 
       // 2. Load account permissions & status from database
@@ -671,14 +671,15 @@
         go('dashboard');
         return;
       }
+      return formError('User account profile not found in database.');
     }
 
-    // Fallback in-memory login logic
-    var u = S.users.filter(function (x) { return x.email.toLowerCase() === email; })[0];
-    if (!u) return formError('No account found for that email. Register to create one.');
-    var blocked = H.signInBlocker(u);
+    // Fallback for seed demo accounts if Supabase client is not loaded
+    var localMatch = S.users.find(function(x) { return x.email.toLowerCase() === email; });
+    if (!localMatch) return formError('Invalid email or password.');
+    var blocked = H.signInBlocker(localMatch);
     if (blocked) return formError(blocked);
-    S.me = u;
+    S.me = localMatch;
     go('dashboard');
   }
 
