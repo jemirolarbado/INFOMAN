@@ -1,14 +1,14 @@
 (function (window) {
   'use strict';
 
-  // Initialize Supabase Client
+  // --- Supabase Client Initialization ---
   var SUPABASE_URL = 'https://pfgwavzauqqbrcmgqjou.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_s4lDEuo5PDkgkMpjdqV7aA_mRoAomRI';
 
   if (window.supabase && window.supabase.createClient) {
     window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   } else {
-    console.warn('Supabase SDK not loaded. Make sure the CDN script is included in index.html before index.js.');
+    console.warn('Supabase JS library not found. Make sure to load CDN script before index.js.');
   }
   var db = window.supabaseClient;
 
@@ -56,11 +56,14 @@
       make(2, 'Sarah', 'Chen', 'superadmin@hope.com', 'Superadmin', 'Active'),
       make(3, 'Lisa', 'Park', 'admin@hope.com', 'Admin', 'Active'),
       make(4, 'David', 'Kim', 'manager@hope.com', 'Admin', 'Active'),
-      make(5, 'Alex', 'Rivera', 'user@hope.com', 'User', 'Active')
+      make(5, 'Alex', 'Rivera', 'user@hope.com', 'User', 'Active'),
+      make(6, 'Maria', 'Santos', 'maria.santos@hope.com', 'User', 'Pending'),
+      make(7, 'Paolo', 'Cruz', 'paolo.cruz@hope.com', 'User', 'Disapproved'),
+      make(8, 'Jerry', 'Esperanza', 'jcesperanza@neu.edu.ph', 'User', 'Blocked')
     ];
   };
 
-  // --- Async Supabase Database Operations ---
+  // --- Async Database Handlers ---
   H.fetchUsersFromSupabase = async function () {
     if (!db) return H.loadUsersLocal();
     try {
@@ -140,7 +143,7 @@
 
   H.hasAnyRight = function (user, moduleId) {
     if (user.role !== 'User') return true;
-    return (user.rights || []).some(function (k) { return k.indexOf(moduleId + ':') === 0; });
+    return user.rights.some(function (k) { return k.indexOf(moduleId + ':') === 0; });
   };
 
   H.describeStatusChange = function (actor, target, to) {
@@ -288,7 +291,8 @@
       '<div class="msg msg-warn"><b>Demo accounts (any password works)</b><br>' +
         'ceo@hope.com or superadmin@hope.com: Superadmin<br>' +
         'admin@hope.com or manager@hope.com: Admin<br>' +
-        'user@hope.com: User</div>' +
+        'user@hope.com: User<br>' +
+        'maria.santos@hope.com: Pending · paolo.cruz@hope.com: Disapproved · jcesperanza@neu.edu.ph: Blocked</div>' +
       '<div class="field"><label for="l-email">Email address</label><input class="input" id="l-email" type="email" autocomplete="username" value="ceo@hope.com" required></div>' +
       '<div class="field"><label for="l-pw">Password</label><div class="input-wrap">' +
         '<input class="input" id="l-pw" type="password" autocomplete="current-password" value="password123" required>' +
@@ -446,7 +450,7 @@
     if (!target) return '';
 
     if (type === 'myrights') {
-      return modalShell('My Rights (' + (target.rights || []).length + ' of ' + H.TOTAL_RIGHTS + ')', '', rightsChecklist(target, false));
+      return modalShell('My Rights (' + target.rights.length + ' of ' + H.TOTAL_RIGHTS + ')', '', rightsChecklist(target, false));
     }
     if (type === 'edit') {
       var canRole = H.canChangeRole(S.me, target);
@@ -472,7 +476,7 @@
         '<div class="modal-head"><h2 id="modal-title">Edit Rights: ' + esc(H.fullName(target)) + '</h2><button type="button" class="btn-icon" data-act="close" aria-label="Close">' + ic('x', 18) + '</button></div>' +
         '<form data-form="rights" data-id="' + target.id + '" novalidate>' +
         '<div class="modal-body">' + rightsChecklist(target, true) + '</div>' +
-        '<div class="modal-foot"><span class="muted"><b id="rcount">' + (target.rights || []).length + '</b> of ' + H.TOTAL_RIGHTS + ' rights selected</span><div class="row"><button type="button" class="btn btn-outline" data-act="close">Cancel</button><button type="submit" class="btn btn-primary">Save rights</button></div></div>' +
+        '<div class="modal-foot"><span class="muted"><b id="rcount">' + target.rights.length + '</b> of ' + H.TOTAL_RIGHTS + ' rights selected</span><div class="row"><button type="button" class="btn btn-outline" data-act="close">Cancel</button><button type="submit" class="btn btn-primary">Save rights</button></div></div>' +
         '</form></div></div>';
     }
     return '';
@@ -489,16 +493,15 @@
   }
 
   function rightsChecklist(target, editable) {
-    var uRights = target.rights || [];
     return H.MODULES.map(function (m) {
       var modBoxes = m.items.map(function (_, i) { return H.rightKey(m, i); });
-      var hasAll = modBoxes.every(function (k) { return uRights.indexOf(k) > -1; });
-      var hasSome = modBoxes.some(function (k) { return uRights.indexOf(k) > -1; });
+      var hasAll = modBoxes.every(function (k) { return target.rights.indexOf(k) > -1; });
+      var hasSome = modBoxes.some(function (k) { return target.rights.indexOf(k) > -1; });
       var headerCheck = hasAll ? 'checked' : '';
 
       var checkboxes = m.items.map(function (itemName, i) {
         var k = H.rightKey(m, i);
-        var checked = uRights.indexOf(k) > -1 ? 'checked' : '';
+        var checked = target.rights.indexOf(k) > -1 ? 'checked' : '';
         return '<label class="check-item"><input type="checkbox" data-right="' + k + '"' + checked + (editable ? '' : ' disabled') + '><span>' + esc(itemName) + '</span></label>';
       }).join('');
 
@@ -631,27 +634,9 @@
     syncRights();
   }
 
-  async function doLogin() {
+  function doLogin() {
     var email = val('l-email').toLowerCase(), pw = document.getElementById('l-pw').value;
     if (!email || !pw) return formError('Enter your email and password.');
-
-    if (db) {
-      var res = await db.from('app_users').select('*').eq('email', email).maybeSingle();
-      if (res.data) {
-        var u = res.data;
-        var blocked = H.signInBlocker(u);
-        if (blocked) return formError(blocked);
-        S.me = u;
-        
-        var idx = S.users.findIndex(function(x) { return x.id === u.id; });
-        if (idx > -1) S.users[idx] = u;
-        else S.users.push(u);
-        
-        go('dashboard');
-        return;
-      }
-    }
-
     var u = S.users.filter(function (x) { return x.email.toLowerCase() === email; })[0];
     if (!u) return formError('No account found for that email. Register to create one.');
     var blocked = H.signInBlocker(u);
@@ -664,21 +649,16 @@
     var first = val('r-first'), last = val('r-last'), email = val('r-email').toLowerCase();
     if (!first || !last) return formError('Enter your first and last name.');
     if (!EMAIL_RE.test(email)) return formError('Enter a valid email address.');
-    if (S.users.some(function (u) { return u.email.toLowerCase() === email; })) {
-      return formError('An account with that email already exists.');
-    }
+    if (S.users.some(function (u) { return u.email.toLowerCase() === email; })) return formError('An account with that email already exists.');
 
     var newUser = { first: first, last: last, email: email, role: 'User', status: 'Pending', rights: H.defaultRights('User') };
 
     if (db) {
       var res = await db.from('app_users').insert([newUser]).select();
       if (res.error) {
-        if (res.error.code === '23505') {
-          return formError('An account with that email already exists.');
-        }
         return formError('Database Error: ' + res.error.message);
       }
-      if (res.data && res.data[0]) newUser = res.data[0];
+      if (res.data && res.data[0]) newUser.id = res.data[0].id;
     } else {
       newUser.id = H.nextId(S.users);
     }
@@ -857,7 +837,7 @@
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
 
-  // App initialization & Supabase sync
+  // App initialization & Supabase data sync
   render();
   H.fetchUsersFromSupabase().then(function (users) {
     S.users = users;
