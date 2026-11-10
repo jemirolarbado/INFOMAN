@@ -722,32 +722,71 @@
     go('login');
   }
 
-  async function doReset() {
+   async function doReset() {
     var email = val('p-email').toLowerCase();
-    if (!EMAIL_RE.test(email)) return formError('Enter a valid email address.');
+    if (!EMAIL_RE.test(email)) {
+      return formError('Enter a valid email address.');
+    }
 
-    if (db) {
-      var res = await db.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin + window.location.pathname + '#reset-password'
-      });
-      if (res.error) return formError(res.error.message);
+    if (!db) {
+      return formError('Unable to connect to Supabase. Please try again.');
+    }
+
+    var res = await db.auth.resetPasswordForEmail(email, {
+      redirectTo: 'https://jemirolarbado.github.io/INFOMAN/'
+    });
+
+    if (res.error) {
+      return formError(res.error.message);
     }
 
     S.resetSent = email;
     render();
   }
 
-  async function doUpdatePassword() {
+    async function doUpdatePassword() {
     var newPassword = val('new-pw');
-    if (!newPassword || newPassword.length < 6) return formError('Password must be at least 6 characters.');
 
-    if (db) {
-      var res = await db.auth.updateUser({ password: newPassword });
-      if (res.error) return formError(res.error.message);
+    if (!newPassword || newPassword.length < 6) {
+      return formError('Password must be at least 6 characters.');
     }
 
-    window.location.hash = '';
-    S.flash = { kind: 'ok', text: 'Password updated successfully! You can now sign in.' };
+    if (!db) {
+      return formError('Unable to connect to Supabase. Please try again.');
+    }
+
+   
+    var sessionRes = await db.auth.getSession();
+
+    if (sessionRes.error || !sessionRes.data.session) {
+      return formError(
+        'Your password reset link is invalid or expired. Please request a new reset link.'
+      );
+    }
+
+
+    var res = await db.auth.updateUser({
+      password: newPassword
+    });
+
+    if (res.error) {
+      return formError(res.error.message);
+    }
+
+    window.history.replaceState(
+      null,
+      document.title,
+      window.location.pathname + window.location.search
+    );
+
+    S.isPasswordUpdate = false;
+    S.resetSent = null;
+
+    S.flash = {
+      kind: 'ok',
+      text: 'Password updated successfully! You can now sign in.'
+    };
+
     go('login');
   }
 
