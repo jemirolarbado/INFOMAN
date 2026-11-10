@@ -733,8 +733,8 @@
     }
 
     var res = await db.auth.resetPasswordForEmail(email, {
-      redirectTo: 'https://jemirolarbado.github.io/INFOMAN/'
-    });
+  redirectTo: 'https://jemirolarbado.github.io/INFOMAN/'
+});
 
     if (res.error) {
       return formError(res.error.message);
