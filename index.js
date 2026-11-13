@@ -694,7 +694,13 @@
     if (pw !== repw) return formError('Passwords do not match.');
 
     if (db) {
-      // Register credentials with Supabase Auth
+      // 1. Check if email already exists in app_users before creating anything
+      var existing = await db.from('app_users').select('id').ilike('email', email).maybeSingle();
+      if (existing.data) {
+        return formError('An account with that email already exists.');
+      }
+
+      // 2. Create account in Supabase Auth
       var authRes = await db.auth.signUp({
         email: email,
         password: pw,
@@ -702,26 +708,31 @@
       });
 
       if (authRes.error) {
-        if (authRes.error.message.includes('already registered')) {
+        if (authRes.error.message.toLowerCase().includes('already registered')) {
           return formError('An account with that email already exists.');
         }
         return formError('Registration Error: ' + authRes.error.message);
       }
 
-      // Sync user row in database
+      // 3. Insert profile into app_users
       var newUser = { first: first, last: last, email: email, role: 'User', status: 'Pending', rights: H.defaultRights('User') };
       var dbRes = await db.from('app_users').insert([newUser]).select();
+      if (dbRes.error) {
+        return formError('An account with that email already exists.');
+      }
       if (dbRes.data && dbRes.data[0]) newUser = dbRes.data[0];
       S.users.push(newUser);
     } else {
-      S.users.push({ id: H.nextId(S.users), first: first, last: last, email: email, role: 'User', status: 'Pending', rights: H.defaultRights('User') });
+      if (S.users.some(function (x) { return x.email.toLowerCase() === email; })) {
+        return formError('An account with that email already exists.');
+      }
+      S.users.push({ first: first, last: last, email: email, role: 'User', status: 'Pending', rights: H.defaultRights('User') });
     }
 
     persist();
     S.flash = { kind: 'ok', text: 'Account created! An Admin must approve your pending account before sign in.' };
     go('login');
   }
-
    async function doReset() {
     var email = val('p-email').toLowerCase();
     if (!EMAIL_RE.test(email)) {
