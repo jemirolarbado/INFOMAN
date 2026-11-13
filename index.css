@@ -453,3 +453,92 @@ tr:last-child td { border-bottom: 0; }
   margin-top: 16px;
   border-top: 1px solid #e2e8f0;
 }
+
+/* === Edit Rights Modal & Form Styling === */
+.modal.modal-lg {
+  max-width: 720px;
+  width: 94%;
+  padding: 24px 28px;
+  border-radius: 16px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.modal-head .btn-icon {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #334155;
+}
+
+.modal-head .btn-icon:hover {
+  background: #e2e8f0;
+}
+
+/* Module permission cards inside form[data-form="rights"] */
+form[data-form="rights"] > div {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+/* Module title + All / None controls row */
+form[data-form="rights"] > div > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* Checkbox grid inside each module section */
+form[data-form="rights"] > div > div:last-child {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+  gap: 10px 14px;
+}
+
+form[data-form="rights"] label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #1e293b;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: background 0.12s ease;
+}
+
+form[data-form="rights"] label:hover {
+  background: #e2e8f0;
+}
+
+/* Footer row (counter + Cancel / Save buttons) */
+form[data-form="rights"] > div:last-of-type {
+  background: transparent;
+  border: none;
+  padding: 12px 0 0 0;
+  margin-bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
