@@ -977,3 +977,576 @@
   });
 
 })(window);
+
+/* ==========================================================
+   SPRINT 2: Customers, Products, Price history
+   Plugs into the app above through window.HopeERP.
+   ========================================================== */
+(function (window) {
+  'use strict';
+  var H = window.HopeERP;
+  if (!H) { console.warn('Sprint 2 module needs window.HopeERP'); return; }
+  var db = window.supabaseClient, esc = H.esc, S = null;
+
+  /* Capture the app state each time the app renders a signed-in screen */
+  var origDash = H.views.dashboard, origUsers = H.views.users;
+  H.views.dashboard = function (s) { S = s; return origDash(s); };
+  H.views.users = function (s) { S = s; return origUsers(s); };
+
+  /* ---------- constants ---------- */
+  var PER = 10;
+  var TERMS = { COD: 'COD', '30D': 'Net 30', '45D': 'Net 45' };
+  var UNITS = ['pc', 'ea', 'mtr', 'pkg', 'ltr'];
+  var SALES_C = { C0001: 3 }, SALES_P = { AD0001: 15 }; /* offline demo only; the database trigger decides when online */
+  var CFG = {
+    customers: { title: 'Customer Management', name: 'Customers', noun: 'customer', key: 'custno', addR: 'customers:0', editR: 'customers:1', delR: 'customers:2', search: ['custno', 'custname', 'address', 'payterm'] },
+    products: { title: 'Product Management', name: 'Products', noun: 'product', key: 'prodcode', addR: 'products:0', editR: 'products:1', delR: 'products:2', search: ['prodcode', 'description'] }
+  };
+  var TBL = {
+    customers: { table: 'customer', list: 'customers', key: ['custno'] },
+    products: { table: 'product', list: 'products', key: ['prodcode'] },
+    price: { table: 'pricehist', list: 'prices', key: ['prodcode', 'effdate'] }
+  };
+  var LATER = ['Human Resources', 'Sales', 'Reports', 'System Settings'];
+  var I = {
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    users: '<circle cx="9" cy="8" r="4"/><path d="M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1"/><path d="M17 4a4 4 0 0 1 0 8M22 21v-1a6 6 0 0 0-4-5.6"/>',
+    box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    check: '<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>',
+    alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/>'
+  };
+  function ic(n, s) {
+    s = s || 20;
+    return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + I[n] + '</svg>';
+  }
+
+  /* ---------- state ---------- */
+  var M = { mod: 'customers', tab: 'active', q: '', page: 1, dlg: null, op: null, remote: false, loading: false, d: { customers: [], products: [], prices: [] } };
+  var LOCAL = null, searchTimer = null, toastTimer = null;
+
+  /* ---------- helpers ---------- */
+  function p2(n) { return (n < 10 ? '0' : '') + n; }
+  function today() { var d = new Date(); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
+  function ts() { var d = new Date(), h = d.getHours(); return today() + ' ' + (h % 12 || 12) + ':' + p2(d.getMinutes()) + ' ' + (h < 12 ? 'AM' : 'PM'); }
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function money(n) { return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function desc(a, b) { return a.effdate < b.effdate ? 1 : a.effdate > b.effdate ? -1 : 0; }
+  function adm() { return S.me.role !== 'User'; }
+  function can(r) { return S.me.role !== 'User' || (S.me.rights || []).indexOf(r) > -1; }
+  function lab(r) { return M.mod === 'customers' ? r.custname : r.description; }
+  function find(mod, key) { return M.d[mod].filter(function (r) { return r[CFG[mod].key] === key; })[0]; }
+  function stamp(s) {
+    var m = /^(.*?) (\d{4}-\d{2}-\d{2} .*)$/.exec(s || '');
+    return m ? '<span class="stamp"><b>' + esc(m[1]) + '</b><br>' + esc(m[2]) + '</span>' : esc(s || '—');
+  }
+  function toast(msg, err) {
+    var el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.toggle('err', !!err);
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, err ? 6000 : 3000);
+  }
+
+  /* ---------- data ---------- */
+  function seed() {
+    var s = 'ADD system 2026-10-01 9:00 AM', ed = 'EDIT Mark David 2026-10-13 1:01 PM', dl = 'DELETE Jacob Dion 2026-10-13 1:01 PM';
+    var cu = [
+      ['C0001', 'Globus Medical, Inc', '2560 Gen Armistead Ave Audubon CA 94031', '30D'],
+      ['C0002', 'RF Industries, Inc', '7610 Miramar Rd San Diego, CA 92602', '45D', ed],
+      ['C0003', 'Trisha Macdowell', '7642 Clairemont Mesa Blvd San Diego CA 90321', 'COD'],
+      ['C0004', 'HMS Holdings, Inc', '1000 So Fremont Ave, Suite 225 Alhambra CA 91303', '45D', dl, 1],
+      ['C0005', 'Christian Andersen', '1120 Lincoln St Suite 809 Sacramento CA 95815', 'COD'],
+      ['C0006', 'Astronics, Inc', '2 Orion Aliso Viejo, CA 92656', '30D'],
+      ['C0007', 'Morgan Alegore', '2 Goodyear Irvine, CA 92618', 'COD', ed],
+      ['C0008', 'Abaxis, Inc', '3240 Whipple Rd, Union City, CA 94587', '30D'],
+      ['C0009', 'Landec Corp.', '3603 Haven Avenue Menlo Park, CA 94025', '30D'],
+      ['C0010', 'SMP Corp.', '3718 Northern Long Island NY 12528', '45D'],
+      ['C0011', 'B&G Foods', '4 Gatehall Dr., Ste. 110 Parsippany, NJ 07054', '45D']
+    ].map(function (a) { return { custno: a[0], custname: a[1], address: a[2], payterm: a[3], stamp: a[4] || s, is_deleted: !!a[5] }; });
+    var pr = [
+      ['AD0001', 'Toshiba Canvio 1 TB', 'ea', 58], ['AD0002', 'WD Ultra 1TB', 'ea', 69.99, ed],
+      ['AD0003', 'Seagate Bracuda 1TB', 'ea', 54.44], ['AD0004', 'Transcend 1 TB', 'ea', 71.99, dl, 1],
+      ['AD0005', 'Seagate Expansion 2 TB', 'ea', null, 'ADD Mark David 2026-11-10 9:12 AM'],
+      ['AK0001', 'HP Pavilion DV6000', 'pc', 12], ['AK0002', 'Micro Innovations Kb', 'pc', 8.37],
+      ['AK0003', 'Steel APEX GAMING KB', 'pc', 99.99], ['AM0001', 'MS Wireless Mouse', 'pc', 38.27],
+      ['AM0002', 'LOGITECH 910-002696', 'pc', 72.72], ['AM0003', 'IMICRO KB-IM8911U', 'pc', 21.45],
+      ['MD0004', 'Acer S231HL BBID 23', 'ea', 145.43]
+    ];
+    var products = [], prices = [];
+    pr.forEach(function (a) {
+      products.push({ prodcode: a[0], description: a[1], unit: a[2], stamp: a[4] || s, is_deleted: !!a[5] });
+      if (a[3] !== null) prices.push({ prodcode: a[0], effdate: a[0] === 'MD0004' ? '2010-08-01' : '2010-01-01', unitprice: a[3], stamp: s, is_deleted: false });
+    });
+    prices.push({ prodcode: 'MD0004', effdate: '2010-05-15', unitprice: 132.21, stamp: s, is_deleted: false });
+    return { customers: cu, products: products, prices: prices };
+  }
+
+  async function load() {
+    if (db) {
+      try {
+        var a = adm(), sfx = a ? '' : '_active';
+        var r = await Promise.all([
+          db.from('customer' + sfx).select('*').order('custno'),
+          db.from('product' + sfx).select('*').order('prodcode'),
+          db.from('pricehist' + sfx).select('*').order('effdate', { ascending: false })
+        ]);
+        if (!r[0].error && !r[1].error && !r[2].error) {
+          M.d = { customers: r[0].data || [], products: r[1].data || [], prices: r[2].data || [] };
+          M.remote = true;
+          return;
+        }
+      } catch (e) { /* fall back to the in-browser demo data */ }
+    }
+    M.remote = false;
+    if (!LOCAL) LOCAL = seed();
+    M.d = LOCAL;
+  }
+
+  async function write(what, row, key, verb) {
+    var T = TBL[what];
+    if (M.remote) {
+      var q = db.from(T.table), r = key ? await q.update(row).match(key) : await q.insert([row]);
+      if (r.error) return r.error.message;
+      await load();
+      return '';
+    }
+    var list = M.d[T.list];
+    var o = key && list.filter(function (x) { return Object.keys(key).every(function (k) { return x[k] === key[k]; }); })[0];
+    if (o) Object.assign(o, row); else { o = Object.assign({ is_deleted: false }, row); list.push(o); }
+    o.stamp = verb + ' ' + H.fullName(S.me) + ' ' + ts();
+    return '';
+  }
+  function keyOf(what, r) {
+    var o = {};
+    TBL[what].key.forEach(function (k) { o[k] = r[k]; });
+    return o;
+  }
+
+  /* ---------- derived lists ---------- */
+  function base() {
+    var k = CFG[M.mod].key, l = (M.d[M.mod] || []).slice().sort(function (a, b) { return a[k] < b[k] ? -1 : 1; });
+    return adm() ? l : l.filter(function (r) { return !r.is_deleted; });
+  }
+  function hay(r) {
+    return CFG[M.mod].search.map(function (f) { return (r[f] || '') + (f === 'payterm' ? ' ' + TERMS[r[f]] : ''); }).join(' ').toLowerCase();
+  }
+  function searched() {
+    var q = M.q.toLowerCase();
+    return base().filter(function (r) { return !q || hay(r).indexOf(q) > -1; });
+  }
+  function view() {
+    var s = searched();
+    return adm() ? s.filter(function (r) { return M.tab === 'all' || (M.tab === 'inactive') === !!r.is_deleted; }) : s;
+  }
+  function priceInfo(code) {
+    var t = today();
+    var rows = (M.d.prices || []).filter(function (p) { return p.prodcode === code && !p.is_deleted; }).sort(desc);
+    return { cur: rows.filter(function (p) { return p.effdate <= t; })[0], next: rows.filter(function (p) { return p.effdate > t; }).pop() };
+  }
+
+  /* ---------- page ---------- */
+  function note() {
+    var c = CFG[M.mod], v = [['add', c.addR, 'Adding'], ['edit', c.editR, 'Editing'], ['delete', c.delR, 'Deleting']];
+    var ok = v.filter(function (x) { return can(x[1]); }).map(function (x) { return x[0]; });
+    var no = v.filter(function (x) { return !can(x[1]); }).map(function (x) { return x[2]; });
+    var t = 'You can ' + (ok.length > 2 ? ok.slice(0, -1).join(', ') + ' and ' + ok[ok.length - 1] : ok.length ? ok.join(' and ') : 'view') + ' ' + c.name.toLowerCase();
+    if (M.mod === 'products') {
+      t += ' and read price history';
+      if (!can('products:3') && !can('products:4')) no.push('Changing prices');
+    }
+    t += '.';
+    if (no.length) t += ' ' + no.join(' and ') + ' needs a right you do not have yet.';
+    return t;
+  }
+
+  function panel() {
+    var c = CFG[M.mod], a = adm(), s = searched();
+    var n = { active: s.filter(function (r) { return !r.is_deleted; }).length, inactive: s.filter(function (r) { return r.is_deleted; }).length, all: s.length };
+    var tabs = a ? '<div class="tabs" role="group" aria-label="Filter by status">' + [['active', 'Active'], ['inactive', 'Inactive'], ['all', 'All']].map(function (t) {
+      return '<button type="button" class="tab" aria-pressed="' + (M.tab === t[0]) + '" data-s2="tab" data-a="' + t[0] + '">' + t[1] + ' (' + n[t[0]] + ')</button>';
+    }).join('') + '</div>' : '';
+    var add = can(c.addR) ? '<button type="button" class="btn btn-primary" data-s2="add">' + ic('plus', 18) + ' Add ' + cap(c.noun) + '</button>' : '';
+    return '<section class="s2-card" aria-label="' + c.name + '">' +
+      (a ? '' : '<div><h2>' + c.name + '</h2><p class="s2-sub">' + esc(note()) + '</p></div>') +
+      '<div class="s2-bar' + (a ? '' : ' user') + '">' + tabs +
+      '<div class="s2-tools"><div class="search">' + ic('search', 18) + '<input id="s2-q" class="input" type="search" autocomplete="off" placeholder="Search ' + c.name.toLowerCase() + '" aria-label="Search ' + c.name.toLowerCase() + '" value="' + esc(M.q) + '"></div>' + add + '</div></div>' +
+      '<div id="s2-res">' + results() + '</div></section>';
+  }
+
+  function empty(icon, title, text, btn) {
+    return '<div class="s2-empty"><span class="icon-tile">' + ic(icon, 26) + '</span><h3>' + title + '</h3><p>' + text + '</p>' + (btn || '') + '</div>';
+  }
+
+  function results() {
+    var c = CFG[M.mod], noun = c.name.toLowerCase(), rows = view(), all = base(), a = adm();
+    if (!rows.length) {
+      if (!all.length) {
+        var may = can(c.addR);
+        return empty(M.mod === 'customers' ? 'users' : 'box', 'No ' + noun + ' yet',
+          cap(noun) + ' you add will show up here.' + (may ? '' : '<br>Ask an Admin to add the first ' + c.noun + '.'),
+          may ? '<button type="button" class="btn btn-primary" data-s2="add">' + ic('plus', 18) + ' Add ' + cap(c.noun) + '</button>' : '');
+      }
+      if (M.q) return empty('search', 'No ' + noun + ' match “' + esc(M.q) + '”', 'Check the spelling, or search by ' + (M.mod === 'customers' ? 'number, name, address or payment term' : 'code or description') + '.', '<button type="button" class="btn btn-outline" data-s2="clear">Clear search</button>');
+      if (M.tab === 'inactive') return empty('check', 'Nothing deleted', 'Deleted ' + noun + ' appear here so an Admin can restore them.');
+      return empty(M.mod === 'customers' ? 'users' : 'box', 'No active ' + noun, 'Everything here was deleted. Open the Inactive tab to restore it.');
+    }
+    var pages = Math.max(1, Math.ceil(rows.length / PER));
+    if (M.page > pages) M.page = pages;
+    var s = (M.page - 1) * PER, cust = M.mod === 'customers';
+    var cols = cust ? ['Cust no', 'Customer name', 'Address', 'Terms'] : ['Prod code', 'Description', 'Unit', 'Current price'];
+    if (a) cols = cols.concat(['Status', 'Stamp']);
+    cols.push('Actions');
+    var th = cols.map(function (h, i) { return '<th' + (!cust && i === 3 ? ' class="num"' : '') + '>' + h + '</th>'; }).join('');
+    var tr = rows.slice(s, s + PER).map(function (r) {
+      var k = r[c.key], cells = '<td><b>' + esc(k) + '</b></td>';
+      if (cust) cells += '<td><b>' + esc(r.custname) + '</b></td><td>' + esc(r.address) + '</td><td>' + esc(TERMS[r.payterm] || r.payterm) + '</td>';
+      else {
+        var pi = priceInfo(k), p = pi.cur ? money(pi.cur.unitprice) : '<span class="dash">—</span>';
+        if (!pi.cur) p += '<small>No price yet</small>';
+        if (pi.next) p += '<small>Scheduled ' + money(pi.next.unitprice) + ' from ' + esc(pi.next.effdate) + '</small>';
+        cells += '<td><b>' + esc(r.description) + '</b></td><td>' + esc(r.unit) + '</td><td class="num">' + p + '</td>';
+      }
+      if (a) cells += '<td><span class="pill ' + (r.is_deleted ? 'st-inactive">Inactive' : 'st-active">Active') + '</span></td><td>' + stamp(r.stamp) + '</td>';
+      return '<tr' + (r.is_deleted ? ' class="row-del"' : '') + '>' + cells + '<td><div class="nowrap">' + rowActs(r) + '</div></td></tr>';
+    }).join('');
+    var pg = '<button type="button" class="pg" data-s2="pg" data-a="prev"' + (M.page === 1 ? ' disabled' : '') + '>Previous</button>';
+    for (var i = 1; i <= pages; i++) pg += '<button type="button" class="pg' + (i === M.page ? ' on' : '') + '" data-s2="pg" data-a="' + i + '"' + (i === M.page ? ' aria-current="page"' : '') + '>' + i + '</button>';
+    pg += '<button type="button" class="pg" data-s2="pg" data-a="next"' + (M.page === pages ? ' disabled' : '') + '>Next</button>';
+    return '<div class="table-wrap"><table><thead><tr>' + th + '</tr></thead><tbody>' + tr + '</tbody></table></div>' +
+      '<div class="pager"><span>Showing ' + (s + 1) + '–' + Math.min(rows.length, s + PER) + ' of ' + rows.length + ' ' + noun + '</span><nav aria-label="Pages">' + pg + '</nav></div>';
+  }
+
+  function rowActs(r) {
+    var c = CFG[M.mod], k = esc(r[c.key]), l = esc(lab(r)), h = '';
+    if (M.mod === 'products') h += '<button type="button" class="btn btn-soft btn-xs" data-s2="prices" data-a="' + k + '" aria-label="Prices for ' + l + '">Prices</button>';
+    if (r.is_deleted) return h + (adm() ? '<button type="button" class="btn btn-soft btn-xs" data-s2="restore" data-a="' + k + '" aria-label="Restore ' + l + '">Restore</button>' : '');
+    if (can(c.editR)) h += '<button type="button" class="btn btn-outline btn-xs" data-s2="edit" data-a="' + k + '" aria-label="Edit ' + l + '">Edit</button>';
+    if (can(c.delR)) h += '<button type="button" class="btn btn-danger btn-xs" data-s2="del" data-a="' + k + '" aria-label="Delete ' + l + '">Delete</button>';
+    return h;
+  }
+
+  function mount() {
+    var main = document.querySelector('.main');
+    if (!main) return;
+    var c = CFG[M.mod], cls = S.me.role === 'Superadmin' ? 'b-super' : adm() ? 'b-admin' : 'b-user';
+    main.innerHTML = '<header class="header"><h1 id="focus" tabindex="-1">' + c.title + '</h1><div class="header-right"><span class="badge ' + cls + '">' + esc(S.me.role.toUpperCase()) + '</span></div></header>' +
+      '<div class="content">' + (M.loading ? '<section class="s2-card"><p class="muted" role="status">Loading ' + c.name.toLowerCase() + '…</p></section>' : panel()) + '</div>';
+    Array.prototype.forEach.call(document.querySelectorAll('.side .nav'), function (b) {
+      var on = b.getAttribute('data-arg') === c.name;
+      b.classList.toggle('on', on);
+      if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    document.title = c.title + ' · Hope, Inc. ERP';
+  }
+
+  async function openModule(mod) {
+    M.mod = mod; M.tab = 'active'; M.q = ''; M.page = 1; M.dlg = null; M.loading = true;
+    drawDlg(); mount();
+    await load();
+    M.loading = false;
+    mount();
+    var f = document.getElementById('focus');
+    if (f) f.focus({ preventScroll: true });
+  }
+
+  /* ---------- dialogs ---------- */
+  function shell(title, sub, inner, cls) {
+    return '<div class="overlay" data-s2="overlay"><div class="modal ' + (cls || '') + '" role="dialog" aria-modal="true" aria-labelledby="s2-t">' +
+      '<div class="m-head"><div><h2 id="s2-t">' + esc(title) + '</h2>' + (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') + '</div>' +
+      '<button type="button" class="icon-btn" data-s2="cancel" aria-label="Close">' + ic('x', 18) + '</button></div>' + inner + '</div></div>';
+  }
+
+  function fields(kind, mode) {
+    if (kind === 'customers') return [
+      { id: 'custno', label: 'Customer no', lock: mode === 'edit', hint: mode === 'edit' ? 'The code is the record’s identity, so it cannot be changed.' : 'Suggested next code. Letter C plus 4 digits.' },
+      { id: 'custname', label: 'Customer name', max: 20, hint: 'Up to 20 characters', ph: 'Required' },
+      { id: 'address', label: 'Address', max: 50, hint: 'Up to 50 characters', ph: 'Required' },
+      { id: 'payterm', label: 'Payment terms', opts: [['', 'Select terms'], ['COD', 'COD'], ['30D', 'Net 30'], ['45D', 'Net 45']] }
+    ];
+    if (kind === 'products') return [
+      { id: 'prodcode', label: 'Prod code', lock: mode === 'edit', hint: mode === 'edit' ? 'The code is the record’s identity, so it cannot be changed.' : 'Two letters plus 4 digits, like AD0001.', ph: 'AD0001' },
+      { id: 'description', label: 'Description', max: 30, hint: 'Up to 30 characters', ph: 'Required' },
+      { id: 'unit', label: 'Unit', opts: [['', 'Select unit']].concat(UNITS.map(function (u) { return [u, u]; })) }
+    ];
+    return [
+      { id: 'effdate', label: 'Effective date', type: 'date', lock: mode === 'edit', hint: 'The day this price starts. A future date is shown as Scheduled.' },
+      { id: 'unitprice', label: 'Unit price', type: 'number', step: '0.01', hint: 'Must be greater than 0', ph: '0.00' }
+    ];
+  }
+
+  function fld(f, v, e) {
+    v = v == null ? '' : v;
+    var inv = e ? ' aria-invalid="true" aria-describedby="e-' + f.id + '"' : '', ctl;
+    if (f.opts) ctl = '<select class="input" id="f-' + f.id + '"' + inv + '>' + f.opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(v) === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
+    else ctl = '<input class="input" id="f-' + f.id + '" type="' + (f.type || 'text') + '"' + (f.step ? ' step="' + f.step + '" min="0"' : '') + (f.max ? ' maxlength="' + f.max + '" data-cnt="1"' : '') + (f.lock ? ' disabled' : '') + (f.ph ? ' placeholder="' + f.ph + '"' : '') + ' value="' + esc(v) + '"' + inv + '>';
+    var foot = f.max ? '<div class="hint hc"><span>' + f.hint + '</span><span data-ctr>' + String(v).length + ' / ' + f.max + '</span></div>' : f.hint ? '<div class="hint">' + f.hint + '</div>' : '';
+    return '<div class="field' + (e ? ' err' : '') + '"><label for="f-' + f.id + '">' + f.label + '</label>' + ctl + (e ? '<div class="ferr" id="e-' + f.id + '">' + esc(e) + '</div>' : '') + foot + '</div>';
+  }
+
+  function formDlg(d) {
+    var n = Object.keys(d.errs || {}).length;
+    var banner = d.err ? '<div class="msg msg-err" role="alert">' + ic('alert', 16) + esc(d.err) + '</div>' : n ? '<div class="msg msg-err" role="alert">' + ic('alert', 16) + 'Please fix ' + n + ' field' + (n > 1 ? 's' : '') + ' below.</div>' : '';
+    return shell(d.title, d.sub, '<form data-s2form="1" novalidate><div class="m-body">' + banner +
+      d.fields.map(function (f) { return fld(f, d.vals[f.id], d.errs && d.errs[f.id]); }).join('') + '</div>' +
+      '<div class="m-foot">' + (d.foot || '<span></span>') + '<div class="btns"><button type="button" class="btn btn-outline" data-s2="cancel">Cancel</button><button type="submit" class="btn btn-primary">' + d.submit + '</button></div></div></form>');
+  }
+
+  function confirmDlg(d) {
+    var bl = d.kind === 'blocked', nm = d.what === 'price' ? 'price' : CFG[d.what].noun;
+    var body = bl ? '<div class="msg msg-err">' + esc(d.reason) + '</div>' : '<p class="muted">' + (adm() ? 'It is hidden from Users and marked Inactive. You can restore it later. Nothing is permanently erased.' : 'An Admin can restore it if this was a mistake.') + '</p>';
+    return '<div class="overlay" data-s2="overlay"><div class="modal confirm" role="alertdialog" aria-modal="true" aria-labelledby="s2-t"><div class="m-body ctr">' +
+      '<span class="icon-tile ' + (bl ? 'ic-amber' : 'ic-red') + '">' + ic('trash', 24) + '</span>' +
+      '<h2 id="s2-t">' + (bl ? 'This ' + nm + ' cannot be deleted' : 'Delete this ' + nm + '?') + '</h2><span class="chipcode">' + esc(d.label) + '</span>' + body +
+      '<div class="row center">' + (bl ? '<button type="button" class="btn btn-outline" data-s2="cancel" data-first>Close</button>' :
+        '<button type="button" class="btn btn-outline" data-s2="cancel" data-first>Cancel</button><button type="button" class="btn btn-red" data-s2="dodel">Delete ' + nm + '</button>') +
+      '</div></div></div></div>';
+  }
+
+  function pricesDlg(d) {
+    var p = find('products', d.code) || {}, a = adm(), t = today();
+    var rows = (M.d.prices || []).filter(function (x) { return x.prodcode === d.code; }).sort(desc);
+    var live = rows.filter(function (x) { return !x.is_deleted; }), cur = live.filter(function (x) { return x.effdate <= t; })[0];
+    var cAdd = can('products:3'), cEdit = can('products:4'), cDel = can('products:5'), acts = cAdd || cEdit || cDel;
+    var n = { active: live.length, inactive: rows.length - live.length, all: rows.length };
+    var shown = a ? rows.filter(function (x) { return d.tab === 'all' || (d.tab === 'inactive') === !!x.is_deleted; }) : live;
+    var top = '';
+    if (a) top = '<div class="tabs" role="group" aria-label="Filter prices">' + [['active', 'Active'], ['inactive', 'Inactive'], ['all', 'All']].map(function (x) {
+      return '<button type="button" class="tab" aria-pressed="' + (d.tab === x[0]) + '" data-s2="ptab" data-a="' + x[0] + '">' + x[1] + ' (' + n[x[0]] + ')</button>';
+    }).join('') + '</div>';
+    var addBtn = cAdd ? '<button type="button" class="btn btn-primary" data-s2="padd">' + ic('plus', 18) + ' Add Price</button>' : '';
+    var warn = !cAdd && !cEdit ? '<div class="msg msg-warn"><b>View only.</b> Ask an Admin for the Add price and Edit price rights.</div>' : '';
+    var body;
+    if (!shown.length) {
+      body = a && d.tab === 'inactive' && rows.length ? empty('check', 'Nothing deleted', 'Deleted prices appear here so an Admin can restore them.') :
+        empty('box', 'No prices yet', 'Until a price is added, this product’s current price shows as — and it cannot be sold.', cAdd ? addBtn : '<span class="muted">Ask an Admin to add a price.</span>');
+    } else {
+      var th = '<th>Effective date</th><th class="num">Unit price</th>' + (a ? '<th>Status</th><th>Stamp</th>' : '') + (acts ? '<th>Actions</th>' : '');
+      var tr = shown.map(function (x) {
+        var tag = x.is_deleted ? '' : x === cur ? '<span class="tag">Current</span>' : x.effdate > t ? '<span class="tag soon">Scheduled</span>' : '';
+        var ac = '', k = esc(x.effdate);
+        if (x.is_deleted) { if (a) ac = '<button type="button" class="btn btn-soft btn-xs" data-s2="prest" data-a="' + k + '">Restore</button>'; }
+        else {
+          if (cEdit) ac += '<button type="button" class="btn btn-outline btn-xs" data-s2="pedit" data-a="' + k + '" aria-label="Edit price from ' + k + '">Edit</button>';
+          if (cDel) ac += '<button type="button" class="btn btn-danger btn-xs" data-s2="pdel" data-a="' + k + '" aria-label="Delete price from ' + k + '">Delete</button>';
+        }
+        return '<tr' + (x.is_deleted ? ' class="row-del"' : '') + '><td><b>' + k + '</b>' + tag + '</td><td class="num">' + money(x.unitprice) + '</td>' +
+          (a ? '<td><span class="pill ' + (x.is_deleted ? 'st-inactive">Inactive' : 'st-active">Active') + '</span></td><td>' + stamp(x.stamp) + '</td>' : '') +
+          (acts ? '<td><div class="nowrap">' + ac + '</div></td>' : '') + '</tr>';
+      }).join('');
+      body = '<div class="table-wrap"><table><thead><tr>' + th + '</tr></thead><tbody>' + tr + '</tbody></table></div>' +
+        '<p class="muted">Current price is the row with the latest effective date that is not in the future. Newest first.</p>';
+    }
+    return shell('Price History · ' + d.code, (p.description || '') + ' · Unit: ' + (p.unit || ''),
+      '<div class="m-body">' + warn + (shown.length || a ? '<div class="p-top">' + top + (shown.length && cAdd ? addBtn : '') + '</div>' : '') + body + '</div>' +
+      '<div class="m-foot"><span></span><div class="btns"><button type="button" class="btn btn-outline" data-s2="cancel">Close</button></div></div>', 'mid');
+  }
+
+  function drawDlg() {
+    var host = document.getElementById('s2-host');
+    if (!host) { host = document.createElement('div'); host.id = 's2-host'; document.body.appendChild(host); }
+    var d = M.dlg;
+    host.innerHTML = !d ? '' : d.kind === 'confirm' || d.kind === 'blocked' ? confirmDlg(d) : d.kind === 'prices' ? pricesDlg(d) : formDlg(d);
+    if (d) {
+      var f = host.querySelector('[data-first]') || host.querySelector('input:not([disabled]),select') || host.querySelector('.m-body button') || host.querySelector('.icon-btn');
+      if (f) f.focus();
+    }
+  }
+
+  function closeDlg() {
+    var d = M.dlg;
+    if (!d) return;
+    if (d.back) { M.dlg = d.back; drawDlg(); return; }
+    M.dlg = null; drawDlg(); mount(); refocus();
+  }
+  function done() { /* after a successful save/delete */
+    var d = M.dlg;
+    if (d.back) { M.dlg = d.back; drawDlg(); return; }
+    M.dlg = null; drawDlg(); mount(); refocus();
+  }
+  function refocus() {
+    var o = M.op, el = o && document.querySelector('[data-s2="' + o.s + '"]' + (o.a != null ? '[data-a="' + o.a + '"]' : ''));
+    el = el || document.getElementById('focus');
+    if (el) el.focus({ preventScroll: true });
+  }
+
+  /* ---------- actions ---------- */
+  function nextCode() {
+    var n = 0;
+    M.d.customers.forEach(function (r) { n = Math.max(n, parseInt(String(r.custno).replace(/\D/g, ''), 10) || 0); });
+    return 'C' + ('0000' + (n + 1)).slice(-4);
+  }
+  function openForm(mode, key) {
+    var m = M.mod, c = CFG[m], r = mode === 'edit' ? find(m, key) : null, vals = {};
+    if (r) Object.keys(r).forEach(function (k) { vals[k] = r[k]; });
+    else if (m === 'customers') vals.custno = nextCode();
+    M.dlg = { kind: m, mode: mode, fields: fields(m, mode), vals: vals, errs: {},
+      title: (mode === 'add' ? 'Add ' : 'Edit ') + cap(c.noun),
+      sub: mode === 'add' ? 'Status and Stamp are filled in by the system.' : 'Changes are written to the audit log.',
+      submit: mode === 'add' ? 'Save ' + cap(c.noun) : 'Save changes',
+      foot: r && adm() ? '<div class="hint">Last action<br>' + esc(r.stamp || '') + '</div>' : '' };
+    drawDlg();
+  }
+  function openPrice(mode, eff) {
+    var prev = M.dlg, r = mode === 'edit' ? M.d.prices.filter(function (x) { return x.prodcode === prev.code && x.effdate === eff; })[0] : null;
+    M.dlg = { kind: 'price', mode: mode, code: prev.code, back: prev, fields: fields('price', mode), errs: {},
+      vals: r ? { effdate: r.effdate, unitprice: r.unitprice } : { effdate: today(), unitprice: '' },
+      title: (mode === 'add' ? 'Add' : 'Edit') + ' Price', sub: 'Product ' + prev.code, submit: mode === 'add' ? 'Save Price' : 'Save changes' };
+    drawDlg();
+  }
+  function len(e, v, k, max, msg) {
+    if (!v[k]) e[k] = msg; else if (v[k].length > max) e[k] = 'At most ' + max + ' characters (now ' + v[k].length + ').';
+  }
+  async function submitForm() {
+    var d = M.dlg, v = {}, e = {}, k = d.kind;
+    d.fields.forEach(function (f) { var el = document.getElementById('f-' + f.id); v[f.id] = f.lock ? d.vals[f.id] : el.value.trim(); });
+    if (k === 'customers') {
+      v.custno = String(v.custno).toUpperCase();
+      if (!/^C\d{4}$/.test(v.custno)) e.custno = 'Use the letter C plus 4 digits, like C0001.';
+      else if (d.mode === 'add' && M.d.customers.some(function (x) { return x.custno === v.custno; })) e.custno = 'Customer number ' + v.custno + ' already exists.';
+      len(e, v, 'custname', 20, 'Enter the customer name.');
+      len(e, v, 'address', 50, 'Enter the address.');
+      if (!v.payterm) e.payterm = 'Choose the payment terms.';
+    } else if (k === 'products') {
+      v.prodcode = String(v.prodcode).toUpperCase();
+      if (!/^[A-Z]{2}\d{4}$/.test(v.prodcode)) e.prodcode = 'Use two letters plus 4 digits, like AD0001.';
+      else if (d.mode === 'add' && M.d.products.some(function (x) { return x.prodcode === v.prodcode; })) e.prodcode = 'Product code ' + v.prodcode + ' already exists.';
+      len(e, v, 'description', 30, 'Enter the description.');
+      if (!v.unit) e.unit = 'Choose a unit.';
+    } else {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v.effdate)) e.effdate = 'Pick an effective date.';
+      else if (d.mode === 'add' && M.d.prices.some(function (x) { return x.prodcode === d.code && x.effdate === v.effdate; })) e.effdate = 'This product already has a price for that date.';
+      var n = Number(v.unitprice);
+      if (v.unitprice === '' || isNaN(n) || n <= 0) e.unitprice = 'Enter a price greater than 0.';
+      else if (n > 99999999.99) e.unitprice = 'Enter a price below 100,000,000.';
+    }
+    d.vals = v; d.errs = e; d.err = '';
+    if (Object.keys(e).length) {
+      drawDlg();
+      var bad = document.querySelector('#s2-host [aria-invalid="true"]');
+      if (bad) bad.focus();
+      return;
+    }
+    var what = k === 'price' ? 'price' : k, row, key = null;
+    if (k === 'customers') row = { custno: v.custno, custname: v.custname, address: v.address, payterm: v.payterm };
+    else if (k === 'products') row = { prodcode: v.prodcode, description: v.description, unit: v.unit };
+    else row = { prodcode: d.code, effdate: v.effdate, unitprice: Number(v.unitprice) };
+    if (d.mode === 'edit') {
+      key = keyOf(what, row);
+      TBL[what].key.forEach(function (x) { delete row[x]; });
+    }
+    var err = await write(what, row, key, d.mode === 'add' ? 'ADD' : 'EDIT');
+    if (err) { d.err = 'Could not save. ' + err; drawDlg(); return; }
+    toast(k === 'price' ? (d.mode === 'add' ? 'Price added.' : 'Price saved.') : d.mode === 'add' ? cap(CFG[k].noun) + ' added.' : 'Changes saved to ' + v[CFG[k].key] + '.');
+    done();
+  }
+
+  function openDel(what, key, label, extra) {
+    var prev = M.dlg, blocked = '';
+    if (!M.remote) {
+      if (what === 'customers' && SALES_C[key]) blocked = 'Cannot delete this customer: ' + SALES_C[key] + ' active sales still refer to it.';
+      if (what === 'products') {
+        var np = M.d.prices.filter(function (x) { return x.prodcode === key && !x.is_deleted; }).length, ns = SALES_P[key] || 0, parts = [];
+        if (ns) parts.push(ns + ' active sale lines');
+        if (np) parts.push(np + ' active price' + (np > 1 ? 's' : ''));
+        if (parts.length) blocked = 'Cannot delete this product: ' + parts.join(' and ') + ' still refer to it. Delete the prices first.';
+      }
+    }
+    M.dlg = { kind: blocked ? 'blocked' : 'confirm', what: what, key: extra || keyOf(what, find(what, key) || {}), label: label, reason: blocked, back: prev && prev.kind === 'prices' ? prev : null };
+    drawDlg();
+  }
+  async function doDel() {
+    var d = M.dlg, err = await write(d.what, { is_deleted: true }, d.key, 'DELETE');
+    if (err) { d.kind = 'blocked'; d.reason = err; drawDlg(); return; }
+    toast((d.what === 'price' ? 'Price' : cap(CFG[d.what].noun)) + ' deleted.' + (adm() ? ' Find it under Inactive to restore it.' : ''));
+    done();
+  }
+  async function restore(what, key, name) {
+    var err = await write(what, { is_deleted: false }, key, 'RESTORE');
+    if (err) return toast('Could not restore. ' + err, true);
+    toast(name + ' restored.');
+    if (M.dlg && M.dlg.kind === 'prices') drawDlg(); else mount();
+  }
+
+  /* ---------- events ---------- */
+  document.addEventListener('click', function (e) { /* sidebar and dashboard module links (capture phase, before the app's own handler) */
+    var el = e.target.closest('[data-act="stub"]');
+    if (!el || !S || !S.me) return;
+    var n = el.getAttribute('data-arg');
+    if (n === 'Customers' || n === 'Products') { e.stopPropagation(); openModule(n.toLowerCase()); }
+    else if (LATER.indexOf(n) > -1) { e.stopPropagation(); toast(n + ' arrives in a later sprint.'); }
+  }, true);
+
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-s2]');
+    if (!el || !S || !S.me) return;
+    var act = el.getAttribute('data-s2'), a = el.getAttribute('data-a');
+    if (!el.closest('.overlay')) M.op = { s: act, a: a };
+    switch (act) {
+      case 'overlay': if (e.target === el) closeDlg(); break;
+      case 'cancel': closeDlg(); break;
+      case 'tab': M.tab = a; M.page = 1; mount(); break;
+      case 'pg': M.page = a === 'prev' ? M.page - 1 : a === 'next' ? M.page + 1 : +a; document.getElementById('s2-res').innerHTML = results(); break;
+      case 'clear': M.q = ''; M.page = 1; mount(); var q = document.getElementById('s2-q'); if (q) q.focus(); break;
+      case 'add': openForm('add'); break;
+      case 'edit': openForm('edit', a); break;
+      case 'del': var r = find(M.mod, a); openDel(M.mod, a, a + ' · ' + lab(r)); break;
+      case 'restore': var rr = find(M.mod, a); restore(M.mod, keyOf(M.mod, rr), cap(CFG[M.mod].noun)); break;
+      case 'prices': M.dlg = { kind: 'prices', code: a, tab: 'active' }; drawDlg(); break;
+      case 'ptab': M.dlg.tab = a; drawDlg(); break;
+      case 'padd': openPrice('add'); break;
+      case 'pedit': openPrice('edit', a); break;
+      case 'pdel': openDel('price', null, M.dlg.code + ' · ' + a, { prodcode: M.dlg.code, effdate: a }); break;
+      case 'prest': restore('price', { prodcode: M.dlg.code, effdate: a }, 'Price'); break;
+      case 'dodel': doDel(); break;
+    }
+  });
+
+  document.addEventListener('submit', function (e) {
+    if (!e.target.closest('[data-s2form]')) return;
+    e.preventDefault();
+    submitForm();
+  });
+
+  document.addEventListener('input', function (e) {
+    var t = e.target;
+    if (t.id === 's2-q') {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () {
+        M.q = t.value.trim(); M.page = 1;
+        var res = document.getElementById('s2-res');
+        if (res) res.innerHTML = results();
+        var bar = document.querySelectorAll('.s2-bar .tab');
+        if (bar.length) mountTabsOnly();
+      }, 250);
+    } else if (t.matches && t.matches('[data-cnt]')) {
+      var c = t.closest('.field').querySelector('[data-ctr]');
+      if (c) c.textContent = t.value.length + ' / ' + t.maxLength;
+    }
+  });
+  function mountTabsOnly() { /* keep tab counts in step with the search without losing focus in the search box */
+    var s = searched();
+    var n = { active: s.filter(function (r) { return !r.is_deleted; }).length, inactive: s.filter(function (r) { return r.is_deleted; }).length, all: s.length };
+    Array.prototype.forEach.call(document.querySelectorAll('.s2-bar .tab'), function (b) {
+      var k = b.getAttribute('data-a');
+      b.textContent = cap(k) + ' (' + n[k] + ')';
+    });
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (!M.dlg) return;
+    if (e.key === 'Escape') { e.stopPropagation(); closeDlg(); return; }
+    if (e.key !== 'Tab') return;
+    var box = document.querySelector('#s2-host .modal');
+    if (!box) return;
+    var list = Array.prototype.filter.call(box.querySelectorAll('button, input, select'), function (n) { return !n.disabled && n.offsetParent !== null; });
+    if (!list.length) return;
+    var first = list[0], last = list[list.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+})(window);
