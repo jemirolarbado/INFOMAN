@@ -681,7 +681,7 @@
     syncRights();
   }
 
-  // --- Real Supabase Auth Handlers ---
+ // --- Real Supabase Auth Handlers ---
   async function doLogin() {
     var email = val('l-email').toLowerCase(), pw = document.getElementById('l-pw') ? document.getElementById('l-pw').value : '';
     if (!email || !pw) return formError('Enter your email and password.');
@@ -689,10 +689,26 @@
     if (db) {
       var authRes = await db.auth.signInWithPassword({ email: email, password: pw });
       if (authRes.error) {
-        return formError('Invalid email or password.');
+        console.error('Supabase Auth error:', authRes.error);
+
+        // Allow built-in @hope.com demo accounts to sign in with password123
+        var demoMatch = S.users.find(function (x) {
+          return x.email.toLowerCase() === email && email.endsWith('@hope.com') && pw === 'password123';
+        });
+        if (demoMatch) {
+          var blockedDemo = H.signInBlocker(demoMatch);
+          if (blockedDemo) return formError(blockedDemo);
+          S.me = demoMatch;
+          H.saveSession(demoMatch);
+          go('dashboard');
+          return;
+        }
+
+        // Show exact Supabase Auth error for non-demo accounts
+        return formError(authRes.error.message || 'Invalid email or password.');
       }
 
-      var userRes = await db.from('app_users').select('*').eq('email', email).maybeSingle();
+      var userRes = await db.from('app_users').select('*').ilike('email', email).maybeSingle();
       if (userRes.data) {
         var u = userRes.data;
         var blocked = H.signInBlocker(u);
