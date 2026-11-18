@@ -1,10 +1,9 @@
 (function (window) {
   'use strict';
 
-  // --- Supabase Client Initialization ---
+  // Supabase Client Initialization
   var SUPABASE_URL = 'https://pfgwavzauqqbrcmgqjou.supabase.co';
-  var SUPABASE_KEY = 'sb_publishable_s4lDEuo5PDkgkMpjdqV7aA_mRoAomRI';
-
+  var SUPABASE_KEY = 'sb_publishable_s4IDEuo5PDkgkMpjdqV7aA_mRoAomRI';
   if (window.supabase && window.supabase.createClient) {
     window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   } else {
@@ -16,9 +15,9 @@
   var H = window.HopeERP;
 
   H.STORAGE_KEY = 'hope_erp_users_v1';
+  H.SESSION_KEY = 'hope_erp_session_v1';
   H.STATUSES = ['Active', 'Pending', 'Blocked', 'Disapproved'];
   H.ROLES = ['User', 'Admin', 'Superadmin'];
-
   H.MODULES = [
     { id: 'customers', name: 'Customers', icon: 'customers', items: ['Add customer', 'Edit customer', 'Delete customer'] },
     { id: 'products', name: 'Products', icon: 'products', items: ['Add product', 'Edit product', 'Delete product', 'Add price', 'Edit price', 'Delete price'] },
@@ -28,7 +27,6 @@
   ];
 
   H.rightKey = function (mod, index) { return mod.id + ':' + index; };
-
   H.ALL_RIGHTS = [];
   H.MODULES.forEach(function (m) {
     m.items.forEach(function (_, i) { H.ALL_RIGHTS.push(H.rightKey(m, i)); });
@@ -47,7 +45,15 @@
   };
 
   function make(id, first, last, email, role, status) {
-    return { id: id, first: first, last: last, email: email, role: role, status: status, rights: H.defaultRights(role) };
+    return {
+      id: id,
+      first: first,
+      last: last,
+      email: email,
+      role: role,
+      status: status,
+      rights: H.defaultRights(role)
+    };
   }
 
   H.seedUsers = function () {
@@ -96,6 +102,22 @@
 
   H.clearUsers = function () {
     try { window.localStorage.removeItem(H.STORAGE_KEY); } catch (e) {}
+  };
+
+  H.saveSession = function (user) {
+    try {
+      if (user) window.localStorage.setItem(H.SESSION_KEY, JSON.stringify(user));
+      else window.localStorage.removeItem(H.SESSION_KEY);
+    } catch (e) {}
+  };
+
+  H.loadSession = function () {
+    try {
+      var raw = window.localStorage.getItem(H.SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
   };
 
   H.nextId = function (users) {
@@ -161,7 +183,7 @@
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      return { '&': '&', '<': '<', '>': '>', '"': '"', "'": ''' }[c];
     });
   }
   H.esc = esc;
@@ -243,21 +265,23 @@
         moduleCard('mc-ink', 'hr', 'Human Resources', 'Employees, jobs, departments, history.') +
         moduleCard('mc-coral', 'sales', 'Sales', 'Orders with line items and totals.') +
       '</section></main>' +
-      '<footer class="page-foot">Hope, Inc. ERP · Information Management project prototype</footer>';
+      '<footer class="page-foot">Hope, Inc. ERP Information Management project prototype</footer>';
   }
 
   function authShell(left, card) {
     return '<div class="auth">' +
       '<section class="auth-left"><div class="brand brand-inv">' + LOGO + '<span>Hope, Inc. ERP</span></div>' +
-      '<div>' + left + '</div><div class="auth-foot">Information Management · Sprint 1</div></section>' +
+      '<div>' + left + '</div><div class="auth-foot">Information Management Sprint 1</div></section>' +
       '<main class="auth-right">' + card + '</main></div>';
   }
+
   var TICK = ic('check', 22);
 
   function register() {
     var left = '<h1 id="focus" tabindex="-1">Join the workspace.</h1>' +
       '<p>Create an account in under a minute. An Admin then approves it and opens the modules you need.</p>' +
       '<ul class="auth-list"><li>' + TICK + 'Starts with User access</li><li>' + TICK + 'An Admin approves new accounts</li><li>' + TICK + 'Rights are granted per module</li></ul>';
+
     var card = '<form class="auth-card" data-form="register" novalidate>' +
       '<div><h2>Create your account</h2><div class="sub">Takes less than a minute.</div></div>' +
       '<div class="msg msg-note">New accounts start as <b>User</b> and stay <b>Pending</b> until an Admin approves them.</div>' +
@@ -284,6 +308,7 @@
         '<div><b>Admin</b><span>All modules and user rights</span></div>' +
         '<div><b>User</b><span>Only the modules granted to you</span></div>' +
       '</div>';
+
     var card = '<form class="auth-card" data-form="login" novalidate>' +
       '<div><h2>Sign in</h2><div class="sub">Use your Hope, Inc. ERP account.</div></div>' +
       flash(S) +
@@ -339,9 +364,11 @@
       '<div class="side-brand">' + LOGO + '<span>Hope, Inc. ERP</span></div>' +
       '<div class="side-label">Modules</div>' +
       navBtn('Dashboard', 'dash', active === 'dashboard', 'go', 'dashboard');
+
     H.MODULES.forEach(function (m) {
       if (H.hasAnyRight(me, m.id)) h += navBtn(m.name, m.icon, false, 'stub', m.name);
     });
+
     if (me.role !== 'User') {
       h += '<div class="side-label">Administration</div>' +
         navBtn('User Management', 'shield', active === 'users', 'go', 'users');
@@ -349,6 +376,7 @@
     } else {
       h += '<div class="side-label">Account</div>' + navBtn('My rights', 'shield', false, 'myrights', '');
     }
+
     h += '<div class="side-user">' + avatar(me) +
       '<div class="who"><b>' + esc(H.fullName(me)) + '</b><span>' + esc(me.role) + '</span></div>' +
       '<button type="button" class="link" data-act="logout">Sign out</button></div></aside>';
@@ -358,14 +386,14 @@
   function shell(S, active, title, inner) {
     return '<div class="shell">' + sidebar(S, active) +
       '<main class="main">' +
-      '<header class="header">' +
-        '<h1 id="focus" tabindex="-1">' + esc(title) + '</h1>' +
-        '<div class="header-right">' +
-          statusPill(S.me.status) +
-          roleBadge(S.me.role) +
-        '</div>' +
-      '</header>' +
-      '<div class="content">' + inner + '</div>' +
+        '<header class="header">' +
+          '<h1 id="focus" tabindex="-1">' + esc(title) + '</h1>' +
+          '<div class="header-right">' +
+            statusPill(S.me.status) +
+            roleBadge(S.me.role) +
+          '</div>' +
+        '</header>' +
+        '<div class="content">' + inner + '</div>' +
       '</main></div>';
   }
 
@@ -388,7 +416,6 @@
         '<p>You are signed in as <b>' + esc(me.role) + '</b> with status <b>' + esc(me.status) + '</b>.</p>' +
       '</div>' +
       '<div class="dash-grid">' + cards + '</div>';
-
     return shell(S, 'dashboard', 'Dashboard', inner);
   }
 
@@ -401,14 +428,13 @@
 
     var tabs = ['all', 'Active', 'Pending', 'Blocked', 'Disapproved'].map(function (tab) {
       return '<button type="button" class="tab' + (S.filter === tab ? ' on' : '') + '" data-act="filter" data-arg="' + tab + '">' +
-        (tab === 'all' ? 'All accounts' : esc(tab)) + ' <span class="count">' + counts[tab] + '</span></button>';
+        (tab === 'all' ? 'All accounts' : esc(tab)) + '<span class="count">' + counts[tab] + '</span></button>';
     }).join('');
 
     var rows = filtered.map(function (u) {
       var manage = H.canManage(S.me, u);
       var status = u.status;
       var actions = '';
-
       if (manage) {
         if (status === 'Pending') {
           actions += '<button type="button" class="btn btn-xs btn-primary" data-act="approve" data-arg="' + u.id + '">Approve</button>';
@@ -423,7 +449,7 @@
           actions += '<button type="button" class="btn btn-xs btn-ghost" data-act="rights" data-arg="' + u.id + '">Rights</button>';
         }
       } else {
-        actions += '<span class="muted">—</span>';
+        actions += '<span class="muted">-</span>';
       }
 
       return '<tr>' +
@@ -435,7 +461,7 @@
     }).join('');
 
     var logRows = S.log.slice(0, 5).map(function (l) {
-      return '<li><span>' + esc(l.time) + '</span> ' + esc(l.text) + '</li>';
+      return '<li><span>' + esc(l.time) + '</span>' + esc(l.text) + '</li>';
     }).join('');
 
     var inner = '' +
@@ -458,32 +484,34 @@
     if (type === 'myrights') {
       return modalShell('My Rights (' + (target.rights || []).length + ' of ' + H.TOTAL_RIGHTS + ')', '', rightsChecklist(target, false));
     }
+
     if (type === 'edit') {
       var canRole = H.canChangeRole(S.me, target);
       var canStat = H.canChangeStatus(S.me, target);
       var body = '' +
         '<form data-form="edit" data-id="' + target.id + '" novalidate>' +
-        '<div class="two-col">' +
-          '<div class="field"><label for="ef-first">First name</label><input class="input" id="ef-first" value="' + esc(target.first) + '" required></div>' +
-          '<div class="field"><label for="ef-last">Last name</label><input class="input" id="ef-last" value="' + esc(target.last) + '" required></div>' +
-        '</div>' +
-        '<div class="field"><label for="ef-email">Email address</label><input class="input" id="ef-email" type="email" value="' + esc(target.email) + '" required></div>' +
-        (canRole ? '<div class="field"><label for="ef-role">Role</label><select class="input" id="ef-role">' + H.ROLES.filter(function(r){return r!=='Superadmin';}).map(function(r){return '<option value="' + r + '"' + (target.role === r ? ' selected' : '') + '>' + r + '</option>';}).join('') + '</select></div>' : '') +
-        (canStat ? '<div class="field"><label for="ef-status">Status</label><select class="input" id="ef-status">' + H.STATUSES.map(function(st){return '<option value="' + st + '"' + (target.status === st ? ' selected' : '') + '>' + st + '</option>';}).join('') + '</select></div>' : '') +
-        '<div class="msg msg-err" id="form-error" role="alert" hidden></div>' +
-        '<div class="modal-foot"><button type="button" class="btn btn-outline" data-act="close">Cancel</button><button type="submit" class="btn btn-primary">Save changes</button></div>' +
+          '<div class="two-col">' +
+            '<div class="field"><label for="ef-first">First name</label><input class="input" id="ef-first" value="' + esc(target.first) + '" required></div>' +
+            '<div class="field"><label for="ef-last">Last name</label><input class="input" id="ef-last" value="' + esc(target.last) + '" required></div>' +
+          '</div>' +
+          '<div class="field"><label for="ef-email">Email address</label><input class="input" id="ef-email" type="email" value="' + esc(target.email) + '" required></div>' +
+          (canRole ? '<div class="field"><label for="ef-role">Role</label><select class="input" id="ef-role">' + H.ROLES.filter(function (r) { return r !== 'Superadmin'; }).map(function (r) { return '<option value="' + r + '"' + (target.role === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></div>' : '') +
+          (canStat ? '<div class="field"><label for="ef-status">Status</label><select class="input" id="ef-status">' + H.STATUSES.map(function (st) { return '<option value="' + st + '"' + (target.status === st ? ' selected' : '') + '>' + st + '</option>'; }).join('') + '</select></div>' : '') +
+          '<div class="msg msg-err" id="form-error" role="alert" hidden></div>' +
+          '<div class="modal-foot"><button type="button" class="btn btn-outline" data-act="close">Cancel</button><button type="submit" class="btn btn-primary">Save changes</button></div>' +
         '</form>';
-      return modalShell('Edit Account — ' + H.fullName(target), '', body);
+      return modalShell('Edit Account - ' + H.fullName(target), '', body);
     }
+
     if (type === 'rights') {
       return '' +
         '<div class="overlay" data-act="overlay">' +
-        '<div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
-        '<div class="modal-head"><h2 id="modal-title">Edit Rights: ' + esc(H.fullName(target)) + '</h2><button type="button" class="btn-icon" data-act="close" aria-label="Close">' + ic('x', 18) + '</button></div>' +
-        '<form data-form="rights" data-id="' + target.id + '" novalidate>' +
-        '<div class="modal-body">' + rightsChecklist(target, true) + '</div>' +
-        '<div class="modal-foot"><span class="muted"><b id="rcount">' + (target.rights || []).length + '</b> of ' + H.TOTAL_RIGHTS + ' rights selected</span><div class="row"><button type="button" class="btn btn-outline" data-act="close">Cancel</button><button type="submit" class="btn btn-primary">Save rights</button></div></div>' +
-        '</form></div></div>';
+          '<div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
+            '<div class="modal-head"><h2 id="modal-title">Edit Rights: ' + esc(H.fullName(target)) + '</h2><button type="button" class="btn-icon" data-act="close" aria-label="Close">' + ic('x', 18) + '</button></div>' +
+            '<form data-form="rights" data-id="' + target.id + '" novalidate>' +
+              '<div class="modal-body">' + rightsChecklist(target, true) + '</div>' +
+              '<div class="modal-foot"><span class="muted"><b id="rcount">' + (target.rights || []).length + '</b> of ' + H.TOTAL_RIGHTS + ' rights selected</span><div class="row"><button type="button" class="btn btn-outline" data-act="close">Cancel</button><button type="submit" class="btn btn-primary">Save rights</button></div></div>' +
+            '</form></div></div>';
     }
     return '';
   }
@@ -491,11 +519,11 @@
   function modalShell(title, sub, body) {
     return '' +
       '<div class="overlay" data-act="overlay">' +
-      '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
-      '<div class="modal-head"><h2 id="modal-title">' + esc(title) + '</h2><button type="button" class="btn-icon" data-act="close" aria-label="Close">' + ic('x', 18) + '</button></div>' +
-      (sub ? '<div class="modal-sub">' + esc(sub) + '</div>' : '') +
-      '<div class="modal-body">' + body + '</div>' +
-      '</div></div>';
+        '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
+          '<div class="modal-head"><h2 id="modal-title">' + esc(title) + '</h2><button type="button" class="btn-icon" data-act="close" aria-label="Close">' + ic('x', 18) + '</button></div>' +
+          (sub ? '<div class="modal-sub">' + esc(sub) + '</div>' : '') +
+          '<div class="modal-body">' + body + '</div>' +
+        '</div></div>';
   }
 
   function rightsChecklist(target, editable) {
@@ -522,7 +550,15 @@
     }).join('');
   }
 
-  H.views = { landing: landing, register: register, login: login, reset: reset, dashboard: dashboard, users: users, modal: modal };
+  H.views = {
+    landing: landing,
+    register: register,
+    login: login,
+    reset: reset,
+    dashboard: dashboard,
+    users: users,
+    modal: modal
+  };
 
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   var appEl = document.getElementById('app');
@@ -537,12 +573,17 @@
     modal: null,
     flash: null,
     resetSent: null,
+    isPasswordUpdate: false,
     log: []
   };
 
   var TITLES = {
-    landing: 'Hope, Inc. ERP', register: 'Create account · Hope, Inc. ERP', login: 'Sign in · Hope, Inc. ERP',
-    reset: 'Reset password · Hope, Inc. ERP', dashboard: 'Dashboard · Hope, Inc. ERP', users: 'User Management · Hope, Inc. ERP'
+    landing: 'Hope, Inc. ERP',
+    register: 'Create account · Hope, Inc. ERP',
+    login: 'Sign in · Hope, Inc. ERP',
+    reset: 'Reset password · Hope, Inc. ERP',
+    dashboard: 'Dashboard · Hope, Inc. ERP',
+    users: 'User Management · Hope, Inc. ERP'
   };
 
   function persist() { H.saveUsersLocal(S.users); }
@@ -577,7 +618,6 @@
   function render() {
     var V = H.views, html;
     if ((S.screen === 'dashboard' || S.screen === 'users') && !S.me) S.screen = 'login';
-
     if (S.modal) {
       var t = H.byId(S.users, S.modal.id);
       var ok = S.modal.type === 'myrights' ? !!S.me
@@ -647,14 +687,11 @@
     if (!email || !pw) return formError('Enter your email and password.');
 
     if (db) {
-      // 1. Authenticate against Supabase Auth service
       var authRes = await db.auth.signInWithPassword({ email: email, password: pw });
       if (authRes.error) {
-        // Strictly reject login on invalid credentials
         return formError('Invalid email or password.');
       }
 
-      // 2. Load account permissions & status from database
       var userRes = await db.from('app_users').select('*').eq('email', email).maybeSingle();
       if (userRes.data) {
         var u = userRes.data;
@@ -664,22 +701,24 @@
           return formError(blocked);
         }
         S.me = u;
-        var idx = S.users.findIndex(function(x) { return x.id === u.id; });
+        H.saveSession(u);
+        var idx = S.users.findIndex(function (x) { return x.id === u.id; });
         if (idx > -1) S.users[idx] = u;
         else S.users.push(u);
-
+        persist();
         go('dashboard');
         return;
       }
       return formError('User account profile not found in database.');
     }
 
-    // Fallback for seed demo accounts if Supabase client is not loaded
-    var localMatch = S.users.find(function(x) { return x.email.toLowerCase() === email; });
+    var localMatch = S.users.find(function (x) { return x.email.toLowerCase() === email; });
     if (!localMatch) return formError('Invalid email or password.');
-    var blocked = H.signInBlocker(localMatch);
-    if (blocked) return formError(blocked);
+    var blockedLocal = H.signInBlocker(localMatch);
+    if (blockedLocal) return formError(blockedLocal);
+
     S.me = localMatch;
+    H.saveSession(localMatch);
     go('dashboard');
   }
 
@@ -694,13 +733,11 @@
     if (pw !== repw) return formError('Passwords do not match.');
 
     if (db) {
-      // 1. Check if email already exists in app_users before creating anything
       var existing = await db.from('app_users').select('id').ilike('email', email).maybeSingle();
       if (existing.data) {
         return formError('An account with that email already exists.');
       }
 
-      // 2. Create account in Supabase Auth
       var authRes = await db.auth.signUp({
         email: email,
         password: pw,
@@ -714,7 +751,6 @@
         return formError('Registration Error: ' + authRes.error.message);
       }
 
-      // 3. Insert profile into app_users
       var newUser = { first: first, last: last, email: email, role: 'User', status: 'Pending', rights: H.defaultRights('User') };
       var dbRes = await db.from('app_users').insert([newUser]).select();
       if (dbRes.error) {
@@ -726,14 +762,15 @@
       if (S.users.some(function (x) { return x.email.toLowerCase() === email; })) {
         return formError('An account with that email already exists.');
       }
-      S.users.push({ first: first, last: last, email: email, role: 'User', status: 'Pending', rights: H.defaultRights('User') });
+      S.users.push({ id: H.nextId(S.users), first: first, last: last, email: email, role: 'User', status: 'Pending', rights: H.defaultRights('User') });
     }
 
     persist();
     S.flash = { kind: 'ok', text: 'Account created! An Admin must approve your pending account before sign in.' };
     go('login');
   }
-   async function doReset() {
+
+  async function doReset() {
     var email = val('p-email').toLowerCase();
     if (!EMAIL_RE.test(email)) {
       return formError('Enter a valid email address.');
@@ -744,8 +781,8 @@
     }
 
     var res = await db.auth.resetPasswordForEmail(email, {
-  redirectTo: 'https://jemirolarbado.github.io/INFOMAN/'
-});
+      redirectTo: 'https://jemirolarbado.github.io/INFOMAN/'
+    });
 
     if (res.error) {
       return formError(res.error.message);
@@ -755,9 +792,8 @@
     render();
   }
 
-    async function doUpdatePassword() {
+  async function doUpdatePassword() {
     var newPassword = val('new-pw');
-
     if (!newPassword || newPassword.length < 6) {
       return formError('Password must be at least 6 characters.');
     }
@@ -766,38 +802,24 @@
       return formError('Unable to connect to Supabase. Please try again.');
     }
 
-   
     var sessionRes = await db.auth.getSession();
-
     if (sessionRes.error || !sessionRes.data.session) {
-      return formError(
-        'Your password reset link is invalid or expired. Please request a new reset link.'
-      );
+      return formError('Your password reset link is invalid or expired. Please request a new reset link.');
     }
 
-
-    var res = await db.auth.updateUser({
-      password: newPassword
-    });
+    var res = await db.auth.updateUser({ password: newPassword });
 
     if (res.error) {
       return formError(res.error.message);
     }
 
-    window.history.replaceState(
-      null,
-      document.title,
-      window.location.pathname + window.location.search
-    );
-
+    window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
     S.isPasswordUpdate = false;
     S.resetSent = null;
-
     S.flash = {
       kind: 'ok',
       text: 'Password updated successfully! You can now sign in.'
     };
-
     go('login');
   }
 
@@ -813,7 +835,6 @@
         if (res.error) console.error('Error updating status in Supabase:', res.error);
       });
     }
-
     persist();
     return d;
   }
@@ -828,10 +849,13 @@
   async function saveEdit(id) {
     var t = H.byId(S.users, id);
     if (!t || !H.canManage(S.me, t)) return deny();
+
     var first = val('ef-first'), last = val('ef-last'), email = val('ef-email').toLowerCase();
     if (!first || !last) return formError('Enter a first and last name.');
     if (!EMAIL_RE.test(email)) return formError('Enter a valid email address.');
-    if (S.users.some(function (u) { return u.id !== t.id && u.email.toLowerCase() === email; })) return formError('Another account already uses that email.');
+    if (S.users.some(function (u) { return u.id !== t.id && u.email.toLowerCase() === email; })) {
+      return formError('Another account already uses that email.');
+    }
 
     t.first = first; t.last = last; t.email = email;
     var note = '';
@@ -845,6 +869,7 @@
         note = ' Role is now ' + role + '.';
       }
     }
+
     if (H.canChangeStatus(S.me, t)) {
       var status = val('ef-status');
       if (H.STATUSES.indexOf(status) > -1) {
@@ -873,10 +898,12 @@
   async function saveRights(id) {
     var t = H.byId(S.users, id);
     if (!t || !H.canRights(S.me, t)) return deny();
+
     var picked = [];
     Array.prototype.forEach.call(appEl.querySelectorAll('input[data-right]'), function (b) {
       if (b.checked) picked.push(b.getAttribute('data-right'));
     });
+
     t.rights = H.ALL_RIGHTS.filter(function (k) { return picked.indexOf(k) > -1; });
     addLog(H.fullName(S.me) + ' updated the rights of ' + H.fullName(t));
 
@@ -899,7 +926,13 @@
 
     switch (act) {
       case 'go': go(arg); break;
-      case 'logout': S.me = null; S.modal = null; if (db) db.auth.signOut(); go('landing'); break;
+      case 'logout':
+        S.me = null;
+        S.modal = null;
+        H.saveSession(null);
+        if (db) db.auth.signOut();
+        go('landing');
+        break;
       case 'filter': S.filter = arg; render(); break;
       case 'approve': quickStatus(id, 'Active'); break;
       case 'disapprove': quickStatus(id, 'Disapproved'); break;
@@ -921,6 +954,7 @@
         break;
       case 'resetdemo':
         H.clearUsers();
+        H.saveSession(null);
         S.users = H.seedUsers();
         S.log = [];
         S.flash = { kind: 'ok', text: 'Demo data was reset.' };
@@ -963,25 +997,67 @@
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
 
-  // Check URL hash for password reset redirect link
+  // Check URL hash for password reset redirect link or restore saved session
   if (window.location.hash && window.location.hash.includes('access_token')) {
     S.screen = 'reset';
     S.isPasswordUpdate = true;
+  } else {
+    var savedUser = H.loadSession();
+    if (savedUser && !H.signInBlocker(savedUser)) {
+      S.me = savedUser;
+      S.screen = 'dashboard';
+    }
   }
 
-  // App initialization & Supabase sync
+  // Initial render & Supabase sync
   render();
-  H.fetchUsersFromSupabase().then(function (users) {
-    S.users = users;
-    render();
-  });
 
+  (async function initApp() {
+    var users = await H.fetchUsersFromSupabase();
+    S.users = users;
+
+    if (db && !S.isPasswordUpdate) {
+      try {
+        var sessRes = await db.auth.getSession();
+        if (sessRes.data && sessRes.data.session && sessRes.data.session.user) {
+          var email = sessRes.data.session.user.email.toLowerCase();
+          var freshUser = S.users.find(function (u) { return u.email.toLowerCase() === email; });
+          if (freshUser && !H.signInBlocker(freshUser)) {
+            S.me = freshUser;
+            H.saveSession(freshUser);
+            if (S.screen === 'landing' || S.screen === 'login') {
+              S.screen = 'dashboard';
+            }
+          } else if (freshUser && H.signInBlocker(freshUser)) {
+            S.me = null;
+            H.saveSession(null);
+            await db.auth.signOut();
+            S.screen = 'login';
+          }
+        }
+      } catch (e) {
+        console.error('Session restore error:', e);
+      }
+    } else if (S.me) {
+      var updated = S.users.find(function (u) { return u.id === S.me.id; });
+      if (updated && !H.signInBlocker(updated)) {
+        S.me = updated;
+        H.saveSession(updated);
+      } else {
+        S.me = null;
+        H.saveSession(null);
+        S.screen = 'login';
+      }
+    }
+
+    render();
+  })();
 })(window);
 
-/* ==========================================================
+/* ==========================================================================
    SPRINT 2: Customers, Products, Price history
    Plugs into the app above through window.HopeERP.
-   ========================================================== */
+   ========================================================================== */
 (function (window) {
   'use strict';
   var H = window.HopeERP;
@@ -993,7 +1069,7 @@
   H.views.dashboard = function (s) { S = s; return origDash(s); };
   H.views.users = function (s) { S = s; return origUsers(s); };
 
-  /* ---------- constants ---------- */
+  /* --- constants --- */
   var PER = 10;
   var TERMS = { COD: 'COD', '30D': 'Net 30', '45D': 'Net 45' };
   var UNITS = ['pc', 'ea', 'mtr', 'pkg', 'ltr'];
@@ -1008,6 +1084,7 @@
     price: { table: 'pricehist', list: 'prices', key: ['prodcode', 'effdate'] }
   };
   var LATER = ['Human Resources', 'Sales', 'Reports', 'System Settings'];
+
   var I = {
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
@@ -1018,16 +1095,17 @@
     check: '<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>',
     alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/>'
   };
+
   function ic(n, s) {
     s = s || 20;
     return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + I[n] + '</svg>';
   }
 
-  /* ---------- state ---------- */
+  /* --- state --- */
   var M = { mod: 'customers', tab: 'active', q: '', page: 1, dlg: null, op: null, remote: false, loading: false, d: { customers: [], products: [], prices: [] } };
   var LOCAL = null, searchTimer = null, toastTimer = null;
 
-  /* ---------- helpers ---------- */
+  /* --- helpers --- */
   function p2(n) { return (n < 10 ? '0' : '') + n; }
   function today() { var d = new Date(); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
   function ts() { var d = new Date(), h = d.getHours(); return today() + ' ' + (h % 12 || 12) + ':' + p2(d.getMinutes()) + ' ' + (h < 12 ? 'AM' : 'PM'); }
@@ -1040,7 +1118,7 @@
   function find(mod, key) { return M.d[mod].filter(function (r) { return r[CFG[mod].key] === key; })[0]; }
   function stamp(s) {
     var m = /^(.*?) (\d{4}-\d{2}-\d{2} .*)$/.exec(s || '');
-    return m ? '<span class="stamp"><b>' + esc(m[1]) + '</b><br>' + esc(m[2]) + '</span>' : esc(s || '—');
+    return m ? '<span class="stamp"><b>' + esc(m[1]) + '</b><br>' + esc(m[2]) + '</span>' : esc(s || '-');
   }
   function toast(msg, err) {
     var el = document.getElementById('toast');
@@ -1052,7 +1130,7 @@
     toastTimer = setTimeout(function () { el.classList.remove('show'); }, err ? 6000 : 3000);
   }
 
-  /* ---------- data ---------- */
+  /* --- data --- */
   function seed() {
     var s = 'ADD system 2026-10-01 9:00 AM', ed = 'EDIT Mark David 2026-10-13 1:01 PM', dl = 'DELETE Jacob Dion 2026-10-13 1:01 PM';
     var cu = [
@@ -1068,6 +1146,7 @@
       ['C0010', 'SMP Corp.', '3718 Northern Long Island NY 12528', '45D'],
       ['C0011', 'B&G Foods', '4 Gatehall Dr., Ste. 110 Parsippany, NJ 07054', '45D']
     ].map(function (a) { return { custno: a[0], custname: a[1], address: a[2], payterm: a[3], stamp: a[4] || s, is_deleted: !!a[5] }; });
+
     var pr = [
       ['AD0001', 'Toshiba Canvio 1 TB', 'ea', 58], ['AD0002', 'WD Ultra 1TB', 'ea', 69.99, ed],
       ['AD0003', 'Seagate Bracuda 1TB', 'ea', 54.44], ['AD0004', 'Transcend 1 TB', 'ea', 71.99, dl, 1],
@@ -1077,6 +1156,7 @@
       ['AM0002', 'LOGITECH 910-002696', 'pc', 72.72], ['AM0003', 'IMICRO KB-IM8911U', 'pc', 21.45],
       ['MD0004', 'Acer S231HL BBID 23', 'ea', 145.43]
     ];
+
     var products = [], prices = [];
     pr.forEach(function (a) {
       products.push({ prodcode: a[0], description: a[1], unit: a[2], stamp: a[4] || s, is_deleted: !!a[5] });
@@ -1121,35 +1201,40 @@
     o.stamp = verb + ' ' + H.fullName(S.me) + ' ' + ts();
     return '';
   }
+
   function keyOf(what, r) {
     var o = {};
     TBL[what].key.forEach(function (k) { o[k] = r[k]; });
     return o;
   }
 
-  /* ---------- derived lists ---------- */
+  /* --- derived lists --- */
   function base() {
     var k = CFG[M.mod].key, l = (M.d[M.mod] || []).slice().sort(function (a, b) { return a[k] < b[k] ? -1 : 1; });
     return adm() ? l : l.filter(function (r) { return !r.is_deleted; });
   }
+
   function hay(r) {
     return CFG[M.mod].search.map(function (f) { return (r[f] || '') + (f === 'payterm' ? ' ' + TERMS[r[f]] : ''); }).join(' ').toLowerCase();
   }
+
   function searched() {
     var q = M.q.toLowerCase();
     return base().filter(function (r) { return !q || hay(r).indexOf(q) > -1; });
   }
+
   function view() {
     var s = searched();
     return adm() ? s.filter(function (r) { return M.tab === 'all' || (M.tab === 'inactive') === !!r.is_deleted; }) : s;
   }
+
   function priceInfo(code) {
     var t = today();
     var rows = (M.d.prices || []).filter(function (p) { return p.prodcode === code && !p.is_deleted; }).sort(desc);
     return { cur: rows.filter(function (p) { return p.effdate <= t; })[0], next: rows.filter(function (p) { return p.effdate > t; }).pop() };
   }
 
-  /* ---------- page ---------- */
+  /* --- page --- */
   function note() {
     var c = CFG[M.mod], v = [['add', c.addR, 'Adding'], ['edit', c.editR, 'Editing'], ['delete', c.delR, 'Deleting']];
     var ok = v.filter(function (x) { return can(x[1]); }).map(function (x) { return x[0]; });
@@ -1191,22 +1276,24 @@
           cap(noun) + ' you add will show up here.' + (may ? '' : '<br>Ask an Admin to add the first ' + c.noun + '.'),
           may ? '<button type="button" class="btn btn-primary" data-s2="add">' + ic('plus', 18) + ' Add ' + cap(c.noun) + '</button>' : '');
       }
-      if (M.q) return empty('search', 'No ' + noun + ' match “' + esc(M.q) + '”', 'Check the spelling, or search by ' + (M.mod === 'customers' ? 'number, name, address or payment term' : 'code or description') + '.', '<button type="button" class="btn btn-outline" data-s2="clear">Clear search</button>');
+      if (M.q) return empty('search', 'No ' + noun + ' match "' + esc(M.q) + '"', 'Check the spelling, or search by ' + (M.mod === 'customers' ? 'number, name, address or payment term' : 'code or description') + '.', '<button type="button" class="btn btn-outline" data-s2="clear">Clear search</button>');
       if (M.tab === 'inactive') return empty('check', 'Nothing deleted', 'Deleted ' + noun + ' appear here so an Admin can restore them.');
       return empty(M.mod === 'customers' ? 'users' : 'box', 'No active ' + noun, 'Everything here was deleted. Open the Inactive tab to restore it.');
     }
+
     var pages = Math.max(1, Math.ceil(rows.length / PER));
     if (M.page > pages) M.page = pages;
     var s = (M.page - 1) * PER, cust = M.mod === 'customers';
     var cols = cust ? ['Cust no', 'Customer name', 'Address', 'Terms'] : ['Prod code', 'Description', 'Unit', 'Current price'];
     if (a) cols = cols.concat(['Status', 'Stamp']);
     cols.push('Actions');
+
     var th = cols.map(function (h, i) { return '<th' + (!cust && i === 3 ? ' class="num"' : '') + '>' + h + '</th>'; }).join('');
     var tr = rows.slice(s, s + PER).map(function (r) {
       var k = r[c.key], cells = '<td><b>' + esc(k) + '</b></td>';
       if (cust) cells += '<td><b>' + esc(r.custname) + '</b></td><td>' + esc(r.address) + '</td><td>' + esc(TERMS[r.payterm] || r.payterm) + '</td>';
       else {
-        var pi = priceInfo(k), p = pi.cur ? money(pi.cur.unitprice) : '<span class="dash">—</span>';
+        var pi = priceInfo(k), p = pi.cur ? money(pi.cur.unitprice) : '<span class="dash">-</span>';
         if (!pi.cur) p += '<small>No price yet</small>';
         if (pi.next) p += '<small>Scheduled ' + money(pi.next.unitprice) + ' from ' + esc(pi.next.effdate) + '</small>';
         cells += '<td><b>' + esc(r.description) + '</b></td><td>' + esc(r.unit) + '</td><td class="num">' + p + '</td>';
@@ -1214,11 +1301,13 @@
       if (a) cells += '<td><span class="pill ' + (r.is_deleted ? 'st-inactive">Inactive' : 'st-active">Active') + '</span></td><td>' + stamp(r.stamp) + '</td>';
       return '<tr' + (r.is_deleted ? ' class="row-del"' : '') + '>' + cells + '<td><div class="nowrap">' + rowActs(r) + '</div></td></tr>';
     }).join('');
+
     var pg = '<button type="button" class="pg" data-s2="pg" data-a="prev"' + (M.page === 1 ? ' disabled' : '') + '>Previous</button>';
     for (var i = 1; i <= pages; i++) pg += '<button type="button" class="pg' + (i === M.page ? ' on' : '') + '" data-s2="pg" data-a="' + i + '"' + (i === M.page ? ' aria-current="page"' : '') + '>' + i + '</button>';
     pg += '<button type="button" class="pg" data-s2="pg" data-a="next"' + (M.page === pages ? ' disabled' : '') + '>Next</button>';
+
     return '<div class="table-wrap"><table><thead><tr>' + th + '</tr></thead><tbody>' + tr + '</tbody></table></div>' +
-      '<div class="pager"><span>Showing ' + (s + 1) + '–' + Math.min(rows.length, s + PER) + ' of ' + rows.length + ' ' + noun + '</span><nav aria-label="Pages">' + pg + '</nav></div>';
+      '<div class="pager"><span>Showing ' + (s + 1) + '-' + Math.min(rows.length, s + PER) + ' of ' + rows.length + ' ' + noun + '</span><nav aria-label="Pages">' + pg + '</nav></div>';
   }
 
   function rowActs(r) {
@@ -1235,7 +1324,8 @@
     if (!main) return;
     var c = CFG[M.mod], cls = S.me.role === 'Superadmin' ? 'b-super' : adm() ? 'b-admin' : 'b-user';
     main.innerHTML = '<header class="header"><h1 id="focus" tabindex="-1">' + c.title + '</h1><div class="header-right"><span class="badge ' + cls + '">' + esc(S.me.role.toUpperCase()) + '</span></div></header>' +
-      '<div class="content">' + (M.loading ? '<section class="s2-card"><p class="muted" role="status">Loading ' + c.name.toLowerCase() + '…</p></section>' : panel()) + '</div>';
+      '<div class="content">' + (M.loading ? '<section class="s2-card"><p class="muted" role="status">Loading ' + c.name.toLowerCase() + '...</p></section>' : panel()) + '</div>';
+
     Array.prototype.forEach.call(document.querySelectorAll('.side .nav'), function (b) {
       var on = b.getAttribute('data-arg') === c.name;
       b.classList.toggle('on', on);
@@ -1254,7 +1344,7 @@
     if (f) f.focus({ preventScroll: true });
   }
 
-  /* ---------- dialogs ---------- */
+  /* --- dialogs --- */
   function shell(title, sub, inner, cls) {
     return '<div class="overlay" data-s2="overlay"><div class="modal ' + (cls || '') + '" role="dialog" aria-modal="true" aria-labelledby="s2-t">' +
       '<div class="m-head"><div><h2 id="s2-t">' + esc(title) + '</h2>' + (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') + '</div>' +
@@ -1263,13 +1353,13 @@
 
   function fields(kind, mode) {
     if (kind === 'customers') return [
-      { id: 'custno', label: 'Customer no', lock: mode === 'edit', hint: mode === 'edit' ? 'The code is the record’s identity, so it cannot be changed.' : 'Suggested next code. Letter C plus 4 digits.' },
+      { id: 'custno', label: 'Customer no', lock: mode === 'edit', hint: mode === 'edit' ? "The code is the record's identity, so it cannot be changed." : 'Suggested next code. Letter C plus 4 digits.' },
       { id: 'custname', label: 'Customer name', max: 20, hint: 'Up to 20 characters', ph: 'Required' },
       { id: 'address', label: 'Address', max: 50, hint: 'Up to 50 characters', ph: 'Required' },
       { id: 'payterm', label: 'Payment terms', opts: [['', 'Select terms'], ['COD', 'COD'], ['30D', 'Net 30'], ['45D', 'Net 45']] }
     ];
     if (kind === 'products') return [
-      { id: 'prodcode', label: 'Prod code', lock: mode === 'edit', hint: mode === 'edit' ? 'The code is the record’s identity, so it cannot be changed.' : 'Two letters plus 4 digits, like AD0001.', ph: 'AD0001' },
+      { id: 'prodcode', label: 'Prod code', lock: mode === 'edit', hint: mode === 'edit' ? "The code is the record's identity, so it cannot be changed." : 'Two letters plus 4 digits, like AD0001.', ph: 'AD0001' },
       { id: 'description', label: 'Description', max: 30, hint: 'Up to 30 characters', ph: 'Required' },
       { id: 'unit', label: 'Unit', opts: [['', 'Select unit']].concat(UNITS.map(function (u) { return [u, u]; })) }
     ];
@@ -1284,7 +1374,7 @@
     var inv = e ? ' aria-invalid="true" aria-describedby="e-' + f.id + '"' : '', ctl;
     if (f.opts) ctl = '<select class="input" id="f-' + f.id + '"' + inv + '>' + f.opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(v) === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
     else ctl = '<input class="input" id="f-' + f.id + '" type="' + (f.type || 'text') + '"' + (f.step ? ' step="' + f.step + '" min="0"' : '') + (f.max ? ' maxlength="' + f.max + '" data-cnt="1"' : '') + (f.lock ? ' disabled' : '') + (f.ph ? ' placeholder="' + f.ph + '"' : '') + ' value="' + esc(v) + '"' + inv + '>';
-    var foot = f.max ? '<div class="hint hc"><span>' + f.hint + '</span><span data-ctr>' + String(v).length + ' / ' + f.max + '</span></div>' : f.hint ? '<div class="hint">' + f.hint + '</div>' : '';
+    var foot = f.max ? '<div class="hint hc"><span>' + f.hint + '</span><span data-ctr>' + String(v).length + '/' + f.max + '</span></div>' : f.hint ? '<div class="hint">' + f.hint + '</div>' : '';
     return '<div class="field' + (e ? ' err' : '') + '"><label for="f-' + f.id + '">' + f.label + '</label>' + ctl + (e ? '<div class="ferr" id="e-' + f.id + '">' + esc(e) + '</div>' : '') + foot + '</div>';
   }
 
@@ -1298,12 +1388,13 @@
 
   function confirmDlg(d) {
     var bl = d.kind === 'blocked', nm = d.what === 'price' ? 'price' : CFG[d.what].noun;
-    var body = bl ? '<div class="msg msg-err">' + esc(d.reason) + '</div>' : '<p class="muted">' + (adm() ? 'It is hidden from Users and marked Inactive. You can restore it later. Nothing is permanently erased.' : 'An Admin can restore it if this was a mistake.') + '</p>';
+    var body = bl ? '<div class="msg msg-err">' + esc(d.reason) + '</div>' : '<p class="muted">' +
+      (adm() ? 'It is hidden from Users and marked Inactive. You can restore it later. Nothing is permanently erased.' : 'An Admin can restore it if this was a mistake.') + '</p>';
     return '<div class="overlay" data-s2="overlay"><div class="modal confirm" role="alertdialog" aria-modal="true" aria-labelledby="s2-t"><div class="m-body ctr">' +
       '<span class="icon-tile ' + (bl ? 'ic-amber' : 'ic-red') + '">' + ic('trash', 24) + '</span>' +
       '<h2 id="s2-t">' + (bl ? 'This ' + nm + ' cannot be deleted' : 'Delete this ' + nm + '?') + '</h2><span class="chipcode">' + esc(d.label) + '</span>' + body +
       '<div class="row center">' + (bl ? '<button type="button" class="btn btn-outline" data-s2="cancel" data-first>Close</button>' :
-        '<button type="button" class="btn btn-outline" data-s2="cancel" data-first>Cancel</button><button type="button" class="btn btn-red" data-s2="dodel">Delete ' + nm + '</button>') +
+      '<button type="button" class="btn btn-outline" data-s2="cancel" data-first>Cancel</button><button type="button" class="btn btn-red" data-s2="dodel">Delete ' + nm + '</button>') +
       '</div></div></div></div>';
   }
 
@@ -1323,7 +1414,7 @@
     var body;
     if (!shown.length) {
       body = a && d.tab === 'inactive' && rows.length ? empty('check', 'Nothing deleted', 'Deleted prices appear here so an Admin can restore them.') :
-        empty('box', 'No prices yet', 'Until a price is added, this product’s current price shows as — and it cannot be sold.', cAdd ? addBtn : '<span class="muted">Ask an Admin to add a price.</span>');
+        empty('box', 'No prices yet', "Until a price is added, this product's current price shows as - and it cannot be sold.", cAdd ? addBtn : '<span class="muted">Ask an Admin to add a price.</span>');
     } else {
       var th = '<th>Effective date</th><th class="num">Unit price</th>' + (a ? '<th>Status</th><th>Stamp</th>' : '') + (acts ? '<th>Actions</th>' : '');
       var tr = shown.map(function (x) {
@@ -1352,7 +1443,7 @@
     var d = M.dlg;
     host.innerHTML = !d ? '' : d.kind === 'confirm' || d.kind === 'blocked' ? confirmDlg(d) : d.kind === 'prices' ? pricesDlg(d) : formDlg(d);
     if (d) {
-      var f = host.querySelector('[data-first]') || host.querySelector('input:not([disabled]),select') || host.querySelector('.m-body button') || host.querySelector('.icon-btn');
+      var f = host.querySelector('[data-first]') || host.querySelector('input:not([disabled]), select') || host.querySelector('.m-body button') || host.querySelector('.icon-btn');
       if (f) f.focus();
     }
   }
@@ -1363,47 +1454,59 @@
     if (d.back) { M.dlg = d.back; drawDlg(); return; }
     M.dlg = null; drawDlg(); mount(); refocus();
   }
+
   function done() { /* after a successful save/delete */
     var d = M.dlg;
     if (d.back) { M.dlg = d.back; drawDlg(); return; }
     M.dlg = null; drawDlg(); mount(); refocus();
   }
+
   function refocus() {
     var o = M.op, el = o && document.querySelector('[data-s2="' + o.s + '"]' + (o.a != null ? '[data-a="' + o.a + '"]' : ''));
     el = el || document.getElementById('focus');
     if (el) el.focus({ preventScroll: true });
   }
 
-  /* ---------- actions ---------- */
+  /* --- actions --- */
   function nextCode() {
     var n = 0;
     M.d.customers.forEach(function (r) { n = Math.max(n, parseInt(String(r.custno).replace(/\D/g, ''), 10) || 0); });
     return 'C' + ('0000' + (n + 1)).slice(-4);
   }
+
   function openForm(mode, key) {
     var m = M.mod, c = CFG[m], r = mode === 'edit' ? find(m, key) : null, vals = {};
     if (r) Object.keys(r).forEach(function (k) { vals[k] = r[k]; });
     else if (m === 'customers') vals.custno = nextCode();
-    M.dlg = { kind: m, mode: mode, fields: fields(m, mode), vals: vals, errs: {},
+    M.dlg = {
+      kind: m, mode: mode, fields: fields(m, mode), vals: vals, errs: {},
       title: (mode === 'add' ? 'Add ' : 'Edit ') + cap(c.noun),
       sub: mode === 'add' ? 'Status and Stamp are filled in by the system.' : 'Changes are written to the audit log.',
       submit: mode === 'add' ? 'Save ' + cap(c.noun) : 'Save changes',
-      foot: r && adm() ? '<div class="hint">Last action<br>' + esc(r.stamp || '') + '</div>' : '' };
+      foot: r && adm() ? '<div class="hint">Last action<br>' + esc(r.stamp || '') + '</div>' : ''
+    };
     drawDlg();
   }
+
   function openPrice(mode, eff) {
     var prev = M.dlg, r = mode === 'edit' ? M.d.prices.filter(function (x) { return x.prodcode === prev.code && x.effdate === eff; })[0] : null;
-    M.dlg = { kind: 'price', mode: mode, code: prev.code, back: prev, fields: fields('price', mode), errs: {},
+    M.dlg = {
+      kind: 'price', mode: mode, code: prev.code, back: prev, fields: fields('price', mode), errs: {},
       vals: r ? { effdate: r.effdate, unitprice: r.unitprice } : { effdate: today(), unitprice: '' },
-      title: (mode === 'add' ? 'Add' : 'Edit') + ' Price', sub: 'Product ' + prev.code, submit: mode === 'add' ? 'Save Price' : 'Save changes' };
+      title: (mode === 'add' ? 'Add' : 'Edit') + ' Price', sub: 'Product ' + prev.code, submit: mode === 'add' ? 'Save Price' : 'Save changes'
+    };
     drawDlg();
   }
+
   function len(e, v, k, max, msg) {
-    if (!v[k]) e[k] = msg; else if (v[k].length > max) e[k] = 'At most ' + max + ' characters (now ' + v[k].length + ').';
+    if (!v[k]) e[k] = msg;
+    else if (v[k].length > max) e[k] = 'At most ' + max + ' characters (now ' + v[k].length + ').';
   }
+
   async function submitForm() {
     var d = M.dlg, v = {}, e = {}, k = d.kind;
     d.fields.forEach(function (f) { var el = document.getElementById('f-' + f.id); v[f.id] = f.lock ? d.vals[f.id] : el.value.trim(); });
+
     if (k === 'customers') {
       v.custno = String(v.custno).toUpperCase();
       if (!/^C\d{4}$/.test(v.custno)) e.custno = 'Use the letter C plus 4 digits, like C0001.';
@@ -1424,6 +1527,7 @@
       if (v.unitprice === '' || isNaN(n) || n <= 0) e.unitprice = 'Enter a price greater than 0.';
       else if (n > 99999999.99) e.unitprice = 'Enter a price below 100,000,000.';
     }
+
     d.vals = v; d.errs = e; d.err = '';
     if (Object.keys(e).length) {
       drawDlg();
@@ -1431,14 +1535,17 @@
       if (bad) bad.focus();
       return;
     }
+
     var what = k === 'price' ? 'price' : k, row, key = null;
     if (k === 'customers') row = { custno: v.custno, custname: v.custname, address: v.address, payterm: v.payterm };
     else if (k === 'products') row = { prodcode: v.prodcode, description: v.description, unit: v.unit };
     else row = { prodcode: d.code, effdate: v.effdate, unitprice: Number(v.unitprice) };
+
     if (d.mode === 'edit') {
       key = keyOf(what, row);
       TBL[what].key.forEach(function (x) { delete row[x]; });
     }
+
     var err = await write(what, row, key, d.mode === 'add' ? 'ADD' : 'EDIT');
     if (err) { d.err = 'Could not save. ' + err; drawDlg(); return; }
     toast(k === 'price' ? (d.mode === 'add' ? 'Price added.' : 'Price saved.') : d.mode === 'add' ? cap(CFG[k].noun) + ' added.' : 'Changes saved to ' + v[CFG[k].key] + '.');
@@ -1459,12 +1566,14 @@
     M.dlg = { kind: blocked ? 'blocked' : 'confirm', what: what, key: extra || keyOf(what, find(what, key) || {}), label: label, reason: blocked, back: prev && prev.kind === 'prices' ? prev : null };
     drawDlg();
   }
+
   async function doDel() {
     var d = M.dlg, err = await write(d.what, { is_deleted: true }, d.key, 'DELETE');
     if (err) { d.kind = 'blocked'; d.reason = err; drawDlg(); return; }
     toast((d.what === 'price' ? 'Price' : cap(CFG[d.what].noun)) + ' deleted.' + (adm() ? ' Find it under Inactive to restore it.' : ''));
     done();
   }
+
   async function restore(what, key, name) {
     var err = await write(what, { is_deleted: false }, key, 'RESTORE');
     if (err) return toast('Could not restore. ' + err, true);
@@ -1472,8 +1581,8 @@
     if (M.dlg && M.dlg.kind === 'prices') drawDlg(); else mount();
   }
 
-  /* ---------- events ---------- */
-  document.addEventListener('click', function (e) { /* sidebar and dashboard module links (capture phase, before the app's own handler) */
+  /* --- events --- */
+  document.addEventListener('click', function (e) {
     var el = e.target.closest('[data-act="stub"]');
     if (!el || !S || !S.me) return;
     var n = el.getAttribute('data-arg');
@@ -1525,10 +1634,11 @@
       }, 250);
     } else if (t.matches && t.matches('[data-cnt]')) {
       var c = t.closest('.field').querySelector('[data-ctr]');
-      if (c) c.textContent = t.value.length + ' / ' + t.maxLength;
+      if (c) c.textContent = t.value.length + '/' + t.maxLength;
     }
   });
-  function mountTabsOnly() { /* keep tab counts in step with the search without losing focus in the search box */
+
+  function mountTabsOnly() {
     var s = searched();
     var n = { active: s.filter(function (r) { return !r.is_deleted; }).length, inactive: s.filter(function (r) { return r.is_deleted; }).length, all: s.length };
     Array.prototype.forEach.call(document.querySelectorAll('.s2-bar .tab'), function (b) {
