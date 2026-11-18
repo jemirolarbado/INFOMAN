@@ -3,7 +3,7 @@
 
   // Supabase Client Initialization
   var SUPABASE_URL = 'https://pfgwavzauqqbrcmgqjou.supabase.co';
-  var SUPABASE_KEY = 'sb_publishable_s4IDEuo5PDkgkMpjdqV7aA_mRoAomRI';
+  var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmZ3dhdnphdXFxYnJjbWdxam91Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3MDM5MTIsImV4cCI6MjEwOTI3OTkxMn0.qGqJd6DwjqBx8UNK846oLz0dA-8xgA_L6bjbkml5lVQ';
   if (window.supabase && window.supabase.createClient) {
     window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   } else {
