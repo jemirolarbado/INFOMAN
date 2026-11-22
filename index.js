@@ -1099,7 +1099,7 @@
     products: { table: 'product', list: 'products', key: ['prodcode'] },
     price: { table: 'pricehist', list: 'prices', key: ['prodcode', 'effdate'] }
   };
-  var LATER = ['Human Resources', 'Sales', 'Reports', 'System Settings'];
+   var LATER = ['Sales', 'Reports', 'System Settings'];
 
   var I = {
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
@@ -1694,6 +1694,445 @@
     if (e.key !== 'Tab') return;
     var box = document.querySelector('#s2-host .modal');
     if (!box) return;
+    var list = Array.prototype.filter.call(box.querySelectorAll('button, input, select'), function (n) { return !n.disabled && n.offsetParent !== null; });
+    if (!list.length) return;
+    var first = list[0], last = list[list.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+})(window);
+
+
+/* ==========================================================================
+   SPRINT 3: Human Resources (employees, jobs, departments, job history)
+   APPEND this block at the very END of index.js. Nothing above is changed.
+   ========================================================================== */
+(function (window) {
+  'use strict';
+  var H = window.HopeERP;
+  if (!H) return;
+  var esc = H.esc, S = null, KEY = 'hope_erp_hr_v1', toastT = null;
+
+  var oD = H.views.dashboard, oU = H.views.users;
+  H.views.dashboard = function (s) { S = s; return oD(s); };
+  H.views.users = function (s) { S = s; return oU(s); };
+
+  var I = {
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="3"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    brief: '<rect x="3" y="7" width="18" height="13" rx="3"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/>',
+    alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/>',
+    check: '<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>'
+  };
+  function ic(n, s) { s = s || 20; return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + I[n] + '</svg>'; }
+
+  /* ---------- data (browser storage prototype, same as Sprint 2 offline mode) ---------- */
+  function seed() {
+    var s = 'ADD system 2026-10-12 09:00 AM';
+    function J(c, d) { return { jobcode: c, jobdesc: d, del: false, stamp: s }; }
+    function Dp(c, d) { return { deptcode: c, deptname: d, del: false, stamp: s }; }
+    function E(n, l, f, g, b, h, sp, del, st) { return { empno: n, lastname: l, firstname: f, gender: g, birthdate: b, hiredate: h, sepdate: sp || '', del: !!del, stamp: st || s }; }
+    function Hh(n, j, d, e, sal) { return { empno: n, jobcode: j, deptcode: d, effdate: e, salary: sal, del: false, stamp: s }; }
+    return {
+      jobs: [J('PRES', 'President'), J('VP', 'Vice president'), J('MGR', 'Manager'), J('SA1', 'Sales Agent 1'), J('SA2', 'Sales Agent 2'), J('SPVR', 'Supervisor'), J('CLK1', 'Clerk 1'), J('CLK2', 'Clerk 2'), J('PR1', 'Programmer 1'), J('PR2', 'Programmer 2'), J('ANL', 'Analyst')],
+      depts: [Dp('ACT', 'Accounting'), Dp('BR1', 'Sales Branch 1'), Dp('BR2', 'Sales Branch 2'), Dp('EXC', 'Executive'), Dp('HRD', 'Human Resource'), Dp('IT', 'Information Tech'), Dp('PAY', 'Payroll'), Dp('WHS', 'Warehouse')],
+      emps: [E('00001', 'Smith', 'John', 'M', '1985-02-20', '2010-05-11'), E('00003', 'Smith', 'Jane', 'F', '1990-05-16', '2010-05-11'), E('00005', 'King', 'Don', 'M', '1986-02-14', '2010-06-23'),
+        E('00007', 'Jenskin', 'Floyd', 'M', '1990-02-20', '2010-05-30', '', false, 'EDIT David Kim 2026-11-05 10:20 AM'), E('00015', 'Zulueta', 'Maggie', 'F', '1990-08-03', '2010-07-05', '2011-03-30'),
+        E('00023', 'Dela Cruz', 'Ana', 'F', '1992-01-10', '2012-03-01', '', true)],
+      hist: [Hh('00001', 'PR1', 'IT', '2010-05-11', 48000), Hh('00001', 'PR2', 'IT', '2010-12-01', 50000), Hh('00001', 'MGR', 'IT', '2030-01-01', 65000),
+        Hh('00003', 'PR1', 'IT', '2010-05-11', 50000), Hh('00003', 'ANL', 'IT', '2010-12-01', 55000),
+        Hh('00007', 'ANL', 'IT', '2010-05-30', 55000), Hh('00007', 'MGR', 'IT', '2011-01-02', 60000), Hh('00007', 'VP', 'IT', '2011-03-31', 80000),
+        Hh('00015', 'SA1', 'BR1', '2010-07-05', 36000)]
+    };
+  }
+  var D;
+  try { D = JSON.parse(window.localStorage.getItem(KEY)); } catch (e) { D = null; }
+  if (!D || !D.emps) D = seed();
+  function save() { try { window.localStorage.setItem(KEY, JSON.stringify(D)); } catch (e) {} }
+
+  /* ---------- state + helpers ---------- */
+  var R = { tab: 'employees', f: 'active', q: '', dlg: null, prof: null, op: null };
+  function p2(n) { return (n < 10 ? '0' : '') + n; }
+  function today() { var d = new Date(); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
+  function ts() { var d = new Date(), h = d.getHours(); return today() + ' ' + p2(h % 12 || 12) + ':' + p2(d.getMinutes()) + ' ' + (h < 12 ? 'AM' : 'PM'); }
+  function money(n) { return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function adm() { return S.me.role !== 'User'; }
+  function can(i) { return S.me.role !== 'User' || (S.me.rights || []).indexOf('hr:' + i) > -1; }
+  function mk(verb) { return verb + ' ' + H.fullName(S.me) + ' ' + ts(); }
+  function toast(m, err) {
+    var el = document.getElementById('toast'); if (!el) return;
+    el.textContent = m; el.classList.toggle('err', !!err); el.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(function () { el.classList.remove('show'); }, err ? 6000 : 3000);
+  }
+  function stamp(s) {
+    var m = /^(\w+ .*?) (\d{4}-\d{2}-\d{2} .*)$/.exec(s || '');
+    return m ? '<span class="stamp"><b>' + esc(m[1]) + '</b><br>' + esc(m[2]) + '</span>' : esc(s || '-');
+  }
+  function jobName(c) { var j = D.jobs.filter(function (x) { return x.jobcode === c; })[0]; return j ? j.jobdesc : c; }
+  function deptName(c) { var d = D.depts.filter(function (x) { return x.deptcode === c; })[0]; return d ? d.deptname : (c || 'None'); }
+  function emp(n) { return D.emps.filter(function (e) { return e.empno === n; })[0]; }
+  function ename(e) { return e.firstname + ' ' + e.lastname; }
+  function mon(a, b) { var x = a.split('-'), y = b.split('-'); return (y[0] - x[0]) * 12 + (y[1] - x[1]) - (+y[2] < +x[2] ? 1 : 0); }
+  function dur(m) { if (m < 1) return 'Less than a month'; var y = Math.floor(m / 12), r = m % 12; return (y ? y + ' yr' + (y > 1 ? 's' : '') + ' ' : '') + (r ? r + ' mo' + (r > 1 ? 's' : '') : '').trim(); }
+  function used(what, code) {
+    return D.hist.filter(function (h) { return !h.del && (what === 'jobs' ? h.jobcode : h.deptcode) === code; }).length;
+  }
+
+  /* timeline model: tags, deltas, current/scheduled */
+  function timeline(e) {
+    var t = today(), act = D.hist.filter(function (h) { return h.empno === e.empno && !h.del; }).sort(function (a, b) { return a.effdate < b.effdate ? -1 : 1; });
+    var curI = -1; act.forEach(function (h, i) { if (h.effdate <= t) curI = i; });
+    return act.map(function (h, i) {
+      var p = act[i - 1], tag = 'Joined', delta = 0;
+      if (p) {
+        delta = h.salary - p.salary;
+        tag = h.jobcode !== p.jobcode ? (h.salary > p.salary ? 'Promotion' : 'Job change') : h.deptcode !== p.deptcode ? 'Transfer' : h.salary > p.salary ? 'Raise' : 'Update';
+      }
+      var nx = act[i + 1], end = nx && nx.effdate <= t ? nx.effdate : e.sepdate || '';
+      var state = h.effdate > t ? 'sched' : (i === curI && !e.sepdate) ? 'cur' : 'past';
+      return { r: h, tag: tag, delta: delta, state: state, end: end, next: nx };
+    });
+  }
+  function curPos(e) { var tl = timeline(e).filter(function (x) { return x.state !== 'sched'; }); return tl.length ? tl[tl.length - 1].r : null; }
+
+  /* ---------- screens ---------- */
+  function empty(icon, title, text, btn) { return '<div class="s2-empty"><span class="icon-tile">' + ic(icon, 26) + '</span><h3>' + title + '</h3><p>' + text + '</p>' + (btn || '') + '</div>'; }
+  function rowsFor() {
+    var q = R.q.toLowerCase(), key = { employees: 'emps', jobs: 'jobs', departments: 'depts' }[R.tab];
+    var l = D[key].filter(function (r) { return adm() || !r.del; });
+    return l.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) > -1; });
+  }
+  function counts(l) { return { active: l.filter(function (r) { return !r.del; }).length, inactive: l.filter(function (r) { return r.del; }).length, all: l.length }; }
+
+  function listHtml() {
+    var all = rowsFor(), n = counts(all), a = adm(), tab = R.tab;
+    var rows = a ? all.filter(function (r) { return R.f === 'all' || (R.f === 'inactive') === r.del; }) : all;
+    var noun = tab === 'employees' ? 'employee' : tab === 'jobs' ? 'job' : 'department';
+    var addI = tab === 'employees' ? 6 : tab === 'jobs' ? 0 : 3, edI = addI + 1, delI = addI + 2;
+    if (!rows.length) {
+      if (R.q) return empty('search', 'No ' + tab + ' match "' + esc(R.q) + '"', 'Check the spelling, or search by code, last name or first name.', '<button type="button" class="btn btn-outline" data-hr="clear">Clear search</button>');
+      if (a && R.f === 'inactive') return empty('check', 'Nothing deleted', 'Deleted ' + tab + ' appear here so an Admin can restore them.');
+      return empty('brief', 'No ' + tab + ' yet', can(addI) ? 'Add the first ' + noun + '.' : 'Ask an Admin to add the first ' + noun + '.');
+    }
+    var th, tr;
+    if (tab === 'employees') {
+      th = ['Emp no', 'Last name', 'First name', 'Sex', 'Birth date', 'Hire date', 'Sep date'].concat(a ? ['Status', 'Stamp'] : []).concat(['Actions']);
+      tr = rows.map(function (e) {
+        var ac = '';
+        if (can(9)) ac += '<button type="button" class="btn btn-soft btn-xs" data-hr="hist" data-a="' + e.empno + '">History</button>';
+        if (e.del) { if (a) ac += '<button type="button" class="btn btn-soft btn-xs" data-hr="restore" data-a="' + e.empno + '">Restore</button>'; }
+        else {
+          if (can(7)) ac += '<button type="button" class="btn btn-outline btn-xs" data-hr="edit" data-a="' + e.empno + '">Edit</button>';
+          if (can(8)) ac += '<button type="button" class="btn btn-danger btn-xs" data-hr="del" data-a="' + e.empno + '">Delete</button>';
+        }
+        return '<tr' + (e.del ? ' class="row-del"' : '') + '><td><code>' + e.empno + '</code></td><td><button type="button" class="link hr-link" data-hr="prof" data-a="' + e.empno + '">' + esc(e.lastname) + '</button></td><td>' + esc(e.firstname) + '</td><td>' + e.gender + '</td><td>' + e.birthdate + '</td><td>' + e.hiredate + '</td><td>' + (e.sepdate ? e.sepdate + '<br><span class="pill st-none">Separated</span>' : '—') + '</td>' +
+          (a ? '<td><span class="pill ' + (e.del ? 'st-inactive">Inactive' : 'st-active">Active') + '</span></td><td>' + stamp(e.stamp) + '</td>' : '') + '<td><div class="nowrap">' + ac + '</div></td></tr>';
+      });
+    } else {
+      var isJ = tab === 'jobs', ck = isJ ? 'jobcode' : 'deptcode', nk = isJ ? 'jobdesc' : 'deptname';
+      th = [isJ ? 'Job code' : 'Dept code', isJ ? 'Description' : 'Department name'].concat(a ? ['Status', 'Stamp'] : []).concat(['Actions']);
+      tr = rows.map(function (r) {
+        var ac = '';
+        if (r.del) { if (a) ac = '<button type="button" class="btn btn-soft btn-xs" data-hr="restore" data-a="' + r[ck] + '">Restore</button>'; }
+        else {
+          if (can(edI)) ac += '<button type="button" class="btn btn-outline btn-xs" data-hr="edit" data-a="' + r[ck] + '">Edit</button>';
+          if (can(delI)) ac += '<button type="button" class="btn btn-danger btn-xs" data-hr="del" data-a="' + r[ck] + '">Delete</button>';
+        }
+        return '<tr' + (r.del ? ' class="row-del"' : '') + '><td><code>' + esc(r[ck]) + '</code></td><td><b>' + esc(r[nk]) + '</b></td>' +
+          (a ? '<td><span class="pill ' + (r.del ? 'st-inactive">Inactive' : 'st-active">Active') + '</span></td><td>' + stamp(r.stamp) + '</td>' : '') + '<td><div class="nowrap">' + ac + '</div></td></tr>';
+      });
+    }
+    return '<div class="table-wrap"><table><thead><tr>' + th.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead><tbody>' + tr.join('') + '</tbody></table></div>';
+  }
+
+  function panel() {
+    var a = adm(), n = counts(rowsFor()), tab = R.tab;
+    var tabs = ['employees', 'jobs', 'departments'].map(function (t) { return '<button type="button" class="hr-tab' + (t === tab ? ' on' : '') + '" data-hr="tab" data-a="' + t + '"' + (t === tab ? ' aria-current="page"' : '') + '>' + t.charAt(0).toUpperCase() + t.slice(1) + '</button>'; }).join('');
+    var chips = a ? '<div class="tabs" role="group" aria-label="Filter by status">' + [['active', 'Active'], ['inactive', 'Inactive'], ['all', 'All']].map(function (t) { return '<button type="button" class="tab" aria-pressed="' + (R.f === t[0]) + '" data-hr="f" data-a="' + t[0] + '">' + t[1] + ' (' + n[t[0]] + ')</button>'; }).join('') + '</div>' : '';
+    var addI = tab === 'employees' ? 6 : tab === 'jobs' ? 0 : 3, noun = tab === 'employees' ? 'Employee' : tab === 'jobs' ? 'Job' : 'Department';
+    var add = can(addI) ? '<button type="button" class="btn btn-primary" data-hr="add">' + ic('plus', 18) + ' Add ' + noun + '</button>' : '';
+    return '<section class="s2-card" aria-label="Human Resources"><div><h2>Human Resources</h2><p class="s2-sub">' + (a ? 'You see every record, including deleted ones. Deleted rows are shaded and can be restored.' : 'You see active records only. The buttons you have depend on your rights.') + '</p></div>' +
+      '<div class="hr-tabs" role="navigation" aria-label="Sections">' + tabs + '</div>' +
+      '<div class="s2-bar' + (a ? '' : ' user') + '">' + chips + '<div class="s2-tools"><div class="search">' + ic('search', 18) + '<input id="hr-q" class="input" type="search" autocomplete="off" placeholder="Search ' + tab + '..." aria-label="Search ' + tab + '" value="' + esc(R.q) + '"></div>' + add + '</div></div>' +
+      '<div id="hr-res">' + listHtml() + '</div></section>';
+  }
+
+  function profile() {
+    var e = emp(R.prof); if (!e) { R.prof = null; return panel(); }
+    var a = adm(), v = can(9), cp = v ? curPos(e) : null, tl = v ? timeline(e).reverse() : [];
+    var sep = !!e.sepdate;
+    var top = '<div class="p-top"><button type="button" class="btn btn-outline" data-hr="back">&larr; Employees</button><div class="row">' +
+      (can(7) && !e.del ? '<button type="button" class="btn btn-outline" data-hr="edit" data-a="' + e.empno + '">Edit employee</button>' : '') +
+      (can(10) && !e.del ? '<button type="button" class="btn btn-primary" data-hr="hadd2" data-a="' + e.empno + '">+ Add history</button>' : '') + '</div></div>';
+    var head = '<div class="hr-id"><span class="avatar hr-av">' + esc(e.firstname.charAt(0) + e.lastname.charAt(0)) + '</span><div><h2>' + esc(ename(e)) + '</h2><div class="row"><span class="chipcode">' + e.empno + '</span>' + (a ? '<span class="pill ' + (e.del ? 'st-inactive">Inactive' : 'st-active">Active') + '</span>' : '') + (sep ? '<span class="pill st-none">Separated</span>' : '') + '</div></div></div>';
+    var tenure = mon(e.hiredate, sep ? e.sepdate : today());
+    var facts = '<div class="hr-box"><h3 class="hr-cap">Personal and employment facts</h3><dl class="hr-dl"><div><dt>Gender</dt><dd>' + (e.gender === 'M' ? 'Male' : 'Female') + '</dd></div><div><dt>Birth date</dt><dd>' + e.birthdate + '</dd></div><div><dt>Hire date</dt><dd>' + e.hiredate + '</dd></div>' +
+      (sep ? '<div><dt>Separation date</dt><dd>' + e.sepdate + '</dd></div>' : '<div><dt>Status</dt><dd>Still employed</dd></div>') + '<div><dt>Tenure</dt><dd>' + dur(tenure) + (sep ? ' (until separation)' : '') + '</dd></div>' + (a ? '<div><dt>Last change</dt><dd>' + stamp(e.stamp) + '</dd></div>' : '') + '</dl></div>';
+    var pos = '<div class="hr-box"><h3 class="hr-cap">' + (sep ? 'Last position' : 'Current position') + '</h3>' + (!v ? '<p class="muted">Hidden. You need the “View job history” right.</p>' : cp ? '<div class="hr-big">' + esc(jobName(cp.jobcode)) + '</div><p class="muted">' + esc(deptName(cp.deptcode)) + '</p><p><b class="hr-sal">' + money(cp.salary) + '</b> <span class="muted">since ' + cp.effdate + '</span></p>' : '<p class="muted">No job history yet.</p>') + '</div>';
+    var tlh;
+    if (!v) tlh = locked();
+    else tlh = '<div class="p-top"><h3 class="hr-cap">Job timeline</h3><button type="button" class="btn btn-soft" data-hr="hist" data-a="' + e.empno + '">Open Job History</button></div>' + (tl.length ? timelineHtml(timeline(e).reverse(), e, false) : empty('brief', 'No job history yet', 'Add the first job to start the timeline.'));
+    return '<section class="s2-card">' + top + head + '<div class="hr-2">' + facts + pos + '</div><div class="hr-box">' + tlh + '</div></section>';
+  }
+  function locked() { return '<div class="hr-lock"><span class="icon-tile">' + ic('lock', 22) + '</span><div><b>Job history is private</b><p class="muted">Salary and job changes are personal data. Ask an Admin for the “View job history” right to see them.</p></div></div>'; }
+
+  function timelineHtml(items, e, acts, filter) {
+    var t = today();
+    return '<ol class="tl" aria-label="Job timeline of ' + esc(ename(e)) + ', newest first">' + items.map(function (x) {
+      var r = x.r, cls = x.state === 'cur' ? ' cur' : x.state === 'sched' ? ' sched' : '';
+      var chips = (x.state === 'cur' ? '<span class="tchip ok">Current</span>' : '') + (x.state === 'sched' ? '<span class="tchip info">Scheduled</span>' : '') + '<span class="tchip ' + (x.tag === 'Job change' ? 'info' : x.tag === 'Transfer' ? 'warn' : 'ok') + '">' + x.tag + '</span>';
+      var delta = x.delta ? '<span class="tchip ' + (x.delta > 0 ? 'ok' : 'bad') + '">' + (x.delta > 0 ? '+' : '-') + money(Math.abs(x.delta)) + '</span>' : '';
+      var span = x.state === 'cur' ? 'Since ' + r.effdate + ' · ' + dur(mon(r.effdate, t)) + ' so far' : x.state === 'sched' ? 'Starts ' + r.effdate : r.effdate + ' → ' + (x.end || '') + ' · ' + dur(mon(r.effdate, x.end || t)) + (e.sepdate && !x.next ? ' · left the company' : '');
+      var ac = '';
+      if (acts) {
+        if (can(11)) ac += '<button type="button" class="btn btn-outline btn-xs" data-hr="hedit" data-a="' + r.effdate + '">Edit</button>';
+        if (can(12)) ac += '<button type="button" class="btn btn-danger btn-xs" data-hr="hdel" data-a="' + r.effdate + '">Delete</button>';
+      }
+      return '<li class="tl-i' + cls + '"><span class="tl-dot" aria-hidden="true"></span><div class="tl-card"><div class="row tl-top"><b>' + r.effdate + '</b>' + chips + '</div><div class="tl-job">' + esc(jobName(r.jobcode)) + ' <span class="muted">· ' + esc(deptName(r.deptcode)) + '</span></div><div class="row"><b>' + money(r.salary) + '</b>' + delta + '<span class="muted">' + span + '</span></div>' + (ac ? '<div class="nowrap">' + ac + '</div>' : '') + '</div></li>';
+    }).join('') + '</ol>';
+  }
+
+  function mount() {
+    var main = document.querySelector('.main'); if (!main || !S || !S.me) return;
+    var cls = S.me.role === 'Superadmin' ? 'b-super' : adm() ? 'b-admin' : 'b-user';
+    main.innerHTML = '<header class="header"><h1 id="focus" tabindex="-1">' + (R.prof ? 'Employee profile' : 'Human Resources') + '</h1><div class="header-right"><span class="badge ' + cls + '">' + esc(S.me.role) + '</span></div></header><div class="content">' + (R.prof ? profile() : panel()) + '</div>';
+    Array.prototype.forEach.call(document.querySelectorAll('.side .nav'), function (b) {
+      var on = b.getAttribute('data-arg') === 'Human Resources'; b.classList.toggle('on', on);
+      if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    document.title = 'Human Resources · Hope, Inc. ERP';
+  }
+  function res() { var r = document.getElementById('hr-res'); if (r) r.innerHTML = listHtml(); }
+
+  /* ---------- dialogs ---------- */
+  function shell(title, sub, inner, cls) {
+    return '<div class="overlay" data-hr="overlay"><div class="modal ' + (cls || '') + '" role="dialog" aria-modal="true" aria-labelledby="hr-t"><div class="m-head"><div><h2 id="hr-t">' + esc(title) + '</h2>' + (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') + '</div><button type="button" class="icon-btn" data-hr="cancel" aria-label="Close">' + ic('x', 18) + '</button></div>' + inner + '</div></div>';
+  }
+  function fld(f, v, e) {
+    v = v == null ? '' : v; var inv = e ? ' aria-invalid="true"' : '', c;
+    if (f.radio) c = '<div class="row" role="radiogroup" aria-label="' + f.label + '">' + f.opts.map(function (o) { return '<label class="chk"><input type="radio" name="f-' + f.id + '" value="' + o[0] + '"' + (v === o[0] ? ' checked' : '') + '> ' + o[1] + '</label>'; }).join('') + '</div>';
+    else if (f.opts) c = '<select class="input" id="f-' + f.id + '"' + inv + '>' + f.opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(v) === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
+    else c = '<input class="input" id="f-' + f.id + '" type="' + (f.type || 'text') + '"' + (f.step ? ' step="0.01" min="0"' : '') + (f.max ? ' maxlength="' + f.max + '"' : '') + (f.lock ? ' disabled' : '') + ' value="' + esc(v) + '"' + inv + '>';
+    return '<div class="field' + (e ? ' err' : '') + '"><label for="f-' + f.id + '">' + f.label + '</label>' + c + (f.hint ? '<div class="hint">' + f.hint + '</div>' : '') + (e ? '<div class="ferr">' + esc(e) + '</div>' : '') + '</div>';
+  }
+  function formDlg(d) {
+    var n = Object.keys(d.errs || {}).length;
+    var banner = n ? '<div class="msg msg-err" role="alert">' + ic('alert', 16) + 'Please fix ' + n + ' field' + (n > 1 ? 's' : '') + ' below.</div>' : '';
+    return shell(d.title, d.sub, '<form data-hrform="1" novalidate><div class="m-body">' + banner + d.fields.map(function (f) { return fld(f, d.vals[f.id], d.errs[f.id]); }).join('') + '</div><div class="m-foot"><span class="hint">Status and stamp are filled in by the system.</span><div class="btns"><button type="button" class="btn btn-outline" data-hr="cancel">Cancel</button><button type="submit" class="btn btn-primary">' + d.submit + '</button></div></div></form>');
+  }
+  function confirmDlg(d) {
+    var bl = !!d.reason;
+    return '<div class="overlay" data-hr="overlay"><div class="modal confirm" role="alertdialog" aria-modal="true" aria-labelledby="hr-t"><div class="m-body ctr"><span class="icon-tile ' + (bl ? 'ic-amber' : 'ic-red') + '">' + ic('trash', 24) + '</span><h2 id="hr-t">' + (bl ? 'This ' + d.noun + ' cannot be deleted' : 'Delete this ' + d.noun + '?') + '</h2><span class="chipcode">' + esc(d.label) + '</span>' +
+      (bl ? '<div class="msg msg-err">' + esc(d.reason) + '</div>' : '<p class="muted">' + (adm() ? 'It is hidden from Users and marked Inactive. You can restore it later. Nothing is permanently erased.' : 'An Admin can restore it if this was a mistake.') + '</p>') +
+      '<div class="row center">' + (bl ? '<button type="button" class="btn btn-outline" data-hr="cancel" data-first>Close</button>' : '<button type="button" class="btn btn-outline" data-hr="cancel" data-first>Cancel</button><button type="button" class="btn btn-red" data-hr="dodel">Delete ' + d.noun + '</button>') + '</div></div></div></div>';
+  }
+  function histDlg(d) {
+    var e = emp(d.emp), a = adm(), cp = curPos(e), all = D.hist.filter(function (h) { return h.empno === e.empno; });
+    var n = counts(all.map(function (h) { return { del: h.del }; }));
+    var tlAll = timeline(e), shown = tlAll;
+    if (a && d.f !== 'active') {
+      var inact = all.filter(function (h) { return h.del; }).map(function (h) { return { r: h, tag: 'Inactive', delta: 0, state: 'past', end: '', next: null, off: true }; });
+      shown = d.f === 'inactive' ? inact : tlAll.concat(inact);
+    }
+    shown = shown.slice().sort(function (x, y) { return x.r.effdate < y.r.effdate ? 1 : -1; });
+    var box = function (k, v) { return '<div class="hr-sum"><span>' + k + '</span><b>' + v + '</b></div>'; };
+    var top = '<div class="hr-sums">' + box('Job', cp ? esc(jobName(cp.jobcode)) : '—') + box('Department', cp ? esc(deptName(cp.deptcode)) : '—') + box('Salary', cp ? money(cp.salary) : '—') + '</div>';
+    var views = '<div class="tabs"><button type="button" class="tab" aria-pressed="' + (d.v === 'tl') + '" data-hr="hv" data-a="tl">Timeline</button><button type="button" class="tab" aria-pressed="' + (d.v === 'tb') + '" data-hr="hv" data-a="tb">Table</button></div>';
+    var flt = a ? '<div class="tabs">' + [['active', 'Active'], ['inactive', 'Inactive'], ['all', 'All']].map(function (t) { return '<button type="button" class="tab" aria-pressed="' + (d.f === t[0]) + '" data-hr="hf" data-a="' + t[0] + '">' + t[1] + ' (' + n[t[0]] + ')</button>'; }).join('') + '</div>' : '';
+    var add = can(10) ? '<button type="button" class="btn btn-primary" data-hr="hadd">+ Add History</button>' : '';
+    var body;
+    if (!shown.length) body = empty('brief', 'No job history yet', 'Add the first job to start the timeline.', add);
+    else if (d.v === 'tl') body = '<ol class="tl">' + shown.map(function (x) {
+      if (x.off) return '<li class="tl-i"><span class="tl-dot"></span><div class="tl-card hatch"><div class="row"><b>' + x.r.effdate + '</b><span class="tchip">Inactive</span></div><div class="tl-job">' + esc(jobName(x.r.jobcode)) + ' <span class="muted">· ' + esc(deptName(x.r.deptcode)) + '</span></div><b>' + money(x.r.salary) + '</b><div class="muted">' + stamp(x.r.stamp) + '</div>' + (a ? '<button type="button" class="btn btn-soft btn-xs" data-hr="hrest" data-a="' + x.r.effdate + '">Restore</button>' : '') + '</div></li>';
+      return timelineHtml([x], e, true).replace(/^<ol[^>]*>|<\/ol>$/g, '');
+    }).join('') + '</ol>';
+    else body = '<div class="table-wrap"><table><thead><tr><th>Effective date</th><th>Job</th><th>Department</th><th>Salary</th>' + (a ? '<th>Stamp</th>' : '') + '</tr></thead><tbody>' + shown.map(function (x) { return '<tr' + (x.off ? ' class="row-del"' : '') + '><td>' + x.r.effdate + '</td><td>' + esc(jobName(x.r.jobcode)) + '</td><td>' + esc(deptName(x.r.deptcode)) + '</td><td>' + money(x.r.salary) + '</td>' + (a ? '<td>' + stamp(x.r.stamp) + '</td>' : '') + '</tr>'; }).join('') + '</tbody></table></div>';
+    return shell('Job History — ' + e.empno, ename(e) + ' · Hired ' + e.hiredate, '<div class="m-body">' + top + '<div class="p-top">' + views + flt + add + '</div>' + body + '</div><div class="m-foot"><span class="hint">' + (a ? 'Birth date and salary are personal data. Every view and change is recorded in the stamp.' : 'Salary is personal data. Please do not share it.') + '</span><div class="btns"><button type="button" class="btn btn-primary" data-hr="cancel">Done</button></div></div>', 'mid');
+  }
+  function draw() {
+    var host = document.getElementById('hr-host');
+    if (!host) { host = document.createElement('div'); host.id = 'hr-host'; document.body.appendChild(host); }
+    var d = R.dlg;
+    host.innerHTML = !d ? '' : d.kind === 'confirm' ? confirmDlg(d) : d.kind === 'hist' ? histDlg(d) : formDlg(d);
+    if (d) { var f = host.querySelector('[data-first]') || host.querySelector('input:not([disabled]), select') || host.querySelector('.icon-btn'); if (f) f.focus(); }
+  }
+  function close() {
+    var d = R.dlg; if (!d) return;
+    if (d.back) { R.dlg = d.back; draw(); return; }
+    R.dlg = null; draw(); mount(); refocus();
+  }
+  function refocus() {
+    var o = R.op, el = o && document.querySelector('[data-hr="' + o.s + '"]' + (o.a != null ? '[data-a="' + o.a + '"]' : ''));
+    el = el || document.getElementById('focus'); if (el) el.focus({ preventScroll: true });
+  }
+
+  /* ---------- forms ---------- */
+  function openForm(kind, key, back) {
+    var tab = R.tab, vals = {}, fields, r, title, ed = key != null && kind !== 'hist';
+    if (kind === 'emp') {
+      r = ed ? emp(key) : null; if (r) Object.keys(r).forEach(function (k) { vals[k] = r[k]; });
+      fields = [{ id: 'empno', label: 'Employee number', lock: ed, max: 5, hint: ed ? 'The number is the record’s identity, so it cannot be changed.' : '5 digits. Must be new.' },
+        { id: 'lastname', label: 'Last name', max: 15, hint: 'Up to 15 characters.' }, { id: 'firstname', label: 'First name', max: 15, hint: 'Up to 15 characters.' },
+        { id: 'gender', label: 'Gender', radio: true, opts: [['M', 'Male'], ['F', 'Female']] },
+        { id: 'birthdate', label: 'Birth date', type: 'date' }, { id: 'hiredate', label: 'Hire date', type: 'date' },
+        { id: 'sepdate', label: 'Separation date (optional)', type: 'date', hint: 'Fill this in only when the employee has left the company. This is not the same as deleting the record.' }];
+      title = (ed ? 'Edit' : 'Add') + ' Employee';
+    } else if (kind === 'job') {
+      r = ed ? D.jobs.filter(function (x) { return x.jobcode === key; })[0] : null; if (r) vals = { jobcode: r.jobcode, jobdesc: r.jobdesc };
+      fields = [{ id: 'jobcode', label: 'Job code', lock: ed, max: 4, hint: '2 to 4 capital letters or digits. Must be new.' }, { id: 'jobdesc', label: 'Description', max: 20, hint: 'Up to 20 characters.' }];
+      title = (ed ? 'Edit' : 'Add') + ' Job';
+    } else if (kind === 'dept') {
+      r = ed ? D.depts.filter(function (x) { return x.deptcode === key; })[0] : null; if (r) vals = { deptcode: r.deptcode, deptname: r.deptname };
+      fields = [{ id: 'deptcode', label: 'Department code', lock: ed, max: 3, hint: '2 or 3 capital letters or digits. Must be new.' }, { id: 'deptname', label: 'Department name', max: 20, hint: 'Up to 20 characters.' }];
+      title = (ed ? 'Edit' : 'Add') + ' Department';
+    } else {
+      var em = emp(back.emp); ed = key != null;
+      r = ed ? D.hist.filter(function (h) { return h.empno === em.empno && h.effdate === key && !h.del; })[0] : null;
+      vals = r ? { jobcode: r.jobcode, deptcode: r.deptcode, effdate: r.effdate, salary: r.salary } : { jobcode: '', deptcode: '', effdate: today(), salary: '' };
+      fields = [{ id: 'jobcode', label: 'Job', lock: ed, opts: [['', 'Select a job']].concat(D.jobs.filter(function (j) { return !j.del; }).map(function (j) { return [j.jobcode, j.jobdesc]; })) },
+        { id: 'deptcode', label: 'Department', opts: [['', 'None']].concat(D.depts.filter(function (x) { return !x.del; }).map(function (x) { return [x.deptcode, x.deptname]; })) },
+        { id: 'effdate', label: 'Effective date', type: 'date', lock: ed, hint: 'Not before the hire date (' + em.hiredate + '). A future date schedules a change.' },
+        { id: 'salary', label: 'Salary (USD)', type: 'number', step: 1 }];
+      title = (ed ? 'Edit' : 'Add') + ' History';
+    }
+    R.dlg = { kind: 'form', form: kind, mode: ed ? 'edit' : 'add', key: key, fields: fields, vals: vals, errs: {}, title: title, sub: kind === 'hist' ? ename(emp(back.emp)) + ' · ' + back.emp : '', submit: ed ? 'Save changes' : 'Save ' + title.split(' ')[1], back: back || null };
+    draw();
+  }
+  function submitForm() {
+    var d = R.dlg, v = {}, e = {}, k = d.form;
+    d.fields.forEach(function (f) {
+      if (f.lock) { v[f.id] = d.vals[f.id]; return; }
+      if (f.radio) { var c = document.querySelector('#hr-host input[name="f-' + f.id + '"]:checked'); v[f.id] = c ? c.value : ''; }
+      else v[f.id] = document.getElementById('f-' + f.id).value.trim();
+    });
+    function len(id, max, msg) { if (!v[id]) e[id] = msg; else if (v[id].length > max) e[id] = 'At most ' + max + ' characters (now ' + v[id].length + ').'; }
+    var t = today();
+    if (k === 'emp') {
+      if (!/^\d{5}$/.test(v.empno)) e.empno = 'Use exactly 5 digits.'; else if (d.mode === 'add' && emp(v.empno)) e.empno = 'Employee number ' + v.empno + ' already exists.';
+      len('lastname', 15, 'Enter the last name.'); len('firstname', 15, 'Enter the first name.');
+      if (!v.gender) e.gender = 'Choose Male or Female.';
+      if (!v.birthdate) e.birthdate = 'Pick the birth date.'; else if (v.birthdate >= t) e.birthdate = 'The birth date must be in the past.';
+      if (!v.hiredate) e.hiredate = 'Pick the hire date.'; else if (v.birthdate && v.hiredate <= v.birthdate) e.hiredate = 'The hire date must be after the birth date.';
+      else { var fh = D.hist.filter(function (h) { return h.empno === v.empno && !h.del; }).sort(function (a, b) { return a.effdate < b.effdate ? -1 : 1; })[0]; if (fh && v.hiredate > fh.effdate) e.hiredate = 'The hire date cannot be after the first job history row (' + fh.effdate + ').'; }
+      if (v.sepdate && v.hiredate && v.sepdate < v.hiredate) e.sepdate = 'The separation date cannot be before the hire date.';
+    } else if (k === 'job') {
+      v.jobcode = v.jobcode.toUpperCase();
+      if (!/^[A-Z0-9]{2,4}$/.test(v.jobcode)) e.jobcode = 'Use 2 to 4 capital letters or digits.'; else if (d.mode === 'add' && D.jobs.some(function (x) { return x.jobcode === v.jobcode; })) e.jobcode = 'Job code ' + v.jobcode + ' already exists.';
+      len('jobdesc', 20, 'Enter the job description.');
+    } else if (k === 'dept') {
+      v.deptcode = v.deptcode.toUpperCase();
+      if (!/^[A-Z0-9]{2,3}$/.test(v.deptcode)) e.deptcode = 'Use 2 or 3 capital letters or digits.'; else if (d.mode === 'add' && D.depts.some(function (x) { return x.deptcode === v.deptcode; })) e.deptcode = 'Department code ' + v.deptcode + ' already exists.';
+      len('deptname', 20, 'Enter the department name.');
+    } else {
+      var em = emp(d.back.emp);
+      if (!v.jobcode) e.jobcode = 'Choose a job.';
+      if (!v.effdate) e.effdate = 'Pick an effective date.'; else if (v.effdate < em.hiredate) e.effdate = 'The effective date cannot be before the hire date (' + em.hiredate + ').';
+      else if (d.mode === 'add' && v.jobcode) {
+        var same = D.hist.filter(function (h) { return h.empno === em.empno && h.jobcode === v.jobcode && h.effdate === v.effdate; })[0];
+        if (same) e.effdate = same.del ? 'A deleted row for this job and date exists. Restore it instead.' : 'This employee already has this job on that date.';
+      }
+      if (v.salary === '' || isNaN(Number(v.salary))) e.salary = 'Enter the salary.'; else if (Number(v.salary) < 0) e.salary = 'The salary cannot be negative.';
+    }
+    d.vals = v; d.errs = e;
+    if (Object.keys(e).length) { draw(); var bad = document.querySelector('#hr-host [aria-invalid="true"], #hr-host .field.err input'); if (bad) bad.focus(); return; }
+    var verb = d.mode === 'add' ? 'ADD' : 'EDIT', msg;
+    if (k === 'emp') {
+      if (d.mode === 'add') D.emps.push({ empno: v.empno, lastname: v.lastname, firstname: v.firstname, gender: v.gender, birthdate: v.birthdate, hiredate: v.hiredate, sepdate: v.sepdate, del: false, stamp: mk(verb) });
+      else Object.assign(emp(v.empno), { lastname: v.lastname, firstname: v.firstname, gender: v.gender, birthdate: v.birthdate, hiredate: v.hiredate, sepdate: v.sepdate, stamp: mk(verb) });
+      msg = 'Employee ' + (d.mode === 'add' ? 'added.' : 'saved.');
+    } else if (k === 'job') {
+      if (d.mode === 'add') D.jobs.push({ jobcode: v.jobcode, jobdesc: v.jobdesc, del: false, stamp: mk(verb) }); else { var j = D.jobs.filter(function (x) { return x.jobcode === v.jobcode; })[0]; j.jobdesc = v.jobdesc; j.stamp = mk(verb); }
+      msg = 'Job ' + (d.mode === 'add' ? 'added.' : 'saved.');
+    } else if (k === 'dept') {
+      if (d.mode === 'add') D.depts.push({ deptcode: v.deptcode, deptname: v.deptname, del: false, stamp: mk(verb) }); else { var p = D.depts.filter(function (x) { return x.deptcode === v.deptcode; })[0]; p.deptname = v.deptname; p.stamp = mk(verb); }
+      msg = 'Department ' + (d.mode === 'add' ? 'added.' : 'saved.');
+    } else {
+      var en = d.back.emp;
+      if (d.mode === 'add') D.hist.push({ empno: en, jobcode: v.jobcode, deptcode: v.deptcode, effdate: v.effdate, salary: Number(v.salary), del: false, stamp: mk(verb) });
+      else { var h = D.hist.filter(function (x) { return x.empno === en && x.effdate === d.key && !x.del; })[0]; h.deptcode = v.deptcode; h.salary = Number(v.salary); h.stamp = mk(verb); }
+      msg = 'History ' + (d.mode === 'add' ? 'added.' : 'saved.');
+    }
+    save(); toast(msg); close();
+  }
+
+  function openDel(what, key, extra) {
+    var noun, label, reason = '', back = R.dlg && R.dlg.kind === 'hist' ? R.dlg : null;
+    if (what === 'emp') { var e = emp(key), n = D.hist.filter(function (h) { return h.empno === key && !h.del; }).length; noun = 'employee'; label = key + ' · ' + ename(e); if (n) reason = 'Cannot delete this employee: ' + n + ' active job history row' + (n > 1 ? 's' : '') + ' still refer to it. Delete the job history first.'; }
+    else if (what === 'job') { noun = 'job'; label = key + ' · ' + jobName(key); var nj = used('jobs', key); if (nj) reason = 'This job cannot be deleted: ' + nj + ' active job history row' + (nj > 1 ? 's' : '') + ' use it.'; }
+    else if (what === 'dept') { noun = 'department'; label = key + ' · ' + deptName(key); var nd = used('depts', key); if (nd) reason = 'This department cannot be deleted: ' + nd + ' active job history row' + (nd > 1 ? 's' : '') + ' use it.'; }
+    else { noun = 'history row'; label = back.emp + ' · ' + key; }
+    R.dlg = { kind: 'confirm', what: what, key: key, noun: noun, label: label, reason: reason, back: back };
+    draw();
+  }
+  function doDel() {
+    var d = R.dlg, w = d.what, k = d.key, o;
+    if (w === 'emp') o = emp(k); else if (w === 'job') o = D.jobs.filter(function (x) { return x.jobcode === k; })[0]; else if (w === 'dept') o = D.depts.filter(function (x) { return x.deptcode === k; })[0];
+    else o = D.hist.filter(function (h) { return h.empno === d.back.emp && h.effdate === k && !h.del; })[0];
+    o.del = true; o.stamp = mk('DELETE'); save();
+    toast(d.noun.charAt(0).toUpperCase() + d.noun.slice(1) + ' deleted.' + (adm() ? ' Find it under Inactive to restore it.' : '')); close();
+  }
+  function restore(what, key) {
+    var o;
+    if (what === 'emp') o = emp(key); else if (what === 'job') o = D.jobs.filter(function (x) { return x.jobcode === key; })[0]; else if (what === 'dept') o = D.depts.filter(function (x) { return x.deptcode === key; })[0];
+    else o = D.hist.filter(function (h) { return h.empno === R.dlg.emp && h.effdate === key && h.del; })[0];
+    if (!o) return; o.del = false; o.stamp = mk('RESTORE'); save(); toast('Restored.');
+    if (R.dlg) draw(); else mount();
+  }
+
+  /* ---------- events ---------- */
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-act="stub"]');
+    if (!el || !S || !S.me) return;
+    if (el.getAttribute('data-arg') === 'Human Resources') {
+      e.stopPropagation(); e.stopImmediatePropagation();
+      R.tab = 'employees'; R.f = 'active'; R.q = ''; R.prof = null; R.dlg = null; draw(); mount();
+      var f = document.getElementById('focus'); if (f) f.focus({ preventScroll: true });
+    }
+  }, true);
+
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-hr]');
+    if (!el || !S || !S.me) return;
+    var act = el.getAttribute('data-hr'), a = el.getAttribute('data-a');
+    if (!el.closest('.overlay')) R.op = { s: act, a: a };
+    var kind = { employees: 'emp', jobs: 'job', departments: 'dept' }[R.tab];
+    switch (act) {
+      case 'overlay': if (e.target === el) close(); break;
+      case 'cancel': close(); break;
+      case 'tab': R.tab = a; R.f = 'active'; R.q = ''; mount(); break;
+      case 'f': R.f = a; mount(); break;
+      case 'clear': R.q = ''; mount(); var q = document.getElementById('hr-q'); if (q) q.focus(); break;
+      case 'add': openForm(kind); break;
+      case 'edit': openForm(R.prof && R.tab === 'employees' ? 'emp' : kind, a); break;
+      case 'del': openDel(kind, a); break;
+      case 'restore': restore(kind, a); break;
+      case 'prof': R.prof = a; mount(); break;
+      case 'back': R.prof = null; mount(); refocus(); break;
+      case 'hist': R.dlg = { kind: 'hist', emp: a, v: 'tl', f: 'active' }; draw(); break;
+      case 'hadd2': R.dlg = { kind: 'hist', emp: a, v: 'tl', f: 'active' }; openForm('hist', null, R.dlg); break;
+      case 'hv': R.dlg.v = a; draw(); break;
+      case 'hf': R.dlg.f = a; draw(); break;
+      case 'hadd': openForm('hist', null, R.dlg); break;
+      case 'hedit': openForm('hist', a, R.dlg); break;
+      case 'hdel': openDel('hist', a); break;
+      case 'hrest': restore('hist', a); break;
+      case 'dodel': doDel(); break;
+    }
+  });
+  document.addEventListener('submit', function (e) { if (!e.target.closest('[data-hrform]')) return; e.preventDefault(); submitForm(); });
+  document.addEventListener('input', function (e) {
+    if (e.target.id !== 'hr-q') return;
+    var t = e.target; clearTimeout(window.__hrQ);
+    window.__hrQ = setTimeout(function () { R.q = t.value.trim(); res(); }, 250);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (!R.dlg) return;
+    if (e.key === 'Escape') { e.stopPropagation(); close(); return; }
+    if (e.key !== 'Tab') return;
+    var box = document.querySelector('#hr-host .modal'); if (!box) return;
     var list = Array.prototype.filter.call(box.querySelectorAll('button, input, select'), function (n) { return !n.disabled && n.offsetParent !== null; });
     if (!list.length) return;
     var first = list[0], last = list[list.length - 1];
