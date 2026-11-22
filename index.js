@@ -1182,21 +1182,38 @@
     return { customers: cu, products: products, prices: prices };
   }
 
+  function mapRow(r) {
+    if (!r) return r;
+    if (r.is_deleted === undefined && r.status !== undefined) {
+      r.is_deleted = String(r.status).trim().toUpperCase() !== 'A';
+    }
+    return r;
+  }
+
   async function load() {
     if (db) {
       try {
-        var a = adm(), sfx = a ? '' : '_active';
         var r = await Promise.all([
-          db.from('customer' + sfx).select('*').order('custno'),
-          db.from('product' + sfx).select('*').order('prodcode'),
-          db.from('pricehist' + sfx).select('*').order('effdate', { ascending: false })
+          db.from('customer').select('*').order('custno'),
+          db.from('product').select('*').order('prodcode'),
+          db.from('pricehist').select('*').order('effdate', { ascending: false })
         ]);
-        if (!r[0].error && !r[1].error && !r[2].error) {
-          M.d = { customers: r[0].data || [], products: r[1].data || [], prices: r[2].data || [] };
+        if (r[0].error) console.error('Customer load error:', r[0].error.message);
+        if (r[1].error) console.error('Product load error:', r[1].error.message);
+        if (r[2].error) console.error('Pricehist load error:', r[2].error.message);
+
+        if (!r[0].error && !r[1].error) {
+          M.d = {
+            customers: (r[0].data || []).map(mapRow),
+            products: (r[1].data || []).map(mapRow),
+            prices: (!r[2].error && r[2].data ? r[2].data : []).map(mapRow)
+          };
           M.remote = true;
           return;
         }
-      } catch (e) { /* fall back to the in-browser demo data */ }
+      } catch (e) {
+        console.error('Supabase load exception:', e);
+      }
     }
     M.remote = false;
     if (!LOCAL) LOCAL = seed();
@@ -1206,7 +1223,15 @@
   async function write(what, row, key, verb) {
     var T = TBL[what];
     if (M.remote) {
-      var q = db.from(T.table), r = key ? await q.update(row).match(key) : await q.insert([row]);
+      var payload = Object.assign({}, row);
+      if (!key && (what === 'customers' || what === 'products')) {
+        payload.status = 'A';
+      }
+      if (payload.is_deleted !== undefined) {
+        payload.status = payload.is_deleted ? 'I' : 'A';
+        delete payload.is_deleted;
+      }
+      var q = db.from(T.table), r = key ? await q.update(payload).match(key) : await q.insert([payload]);
       if (r.error) return r.error.message;
       await load();
       return '';
