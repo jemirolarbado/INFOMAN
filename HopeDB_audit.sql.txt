@@ -1037,6 +1037,7 @@ INSERT INTO priceHist VALUES('2010-12-01','MP0003', 425);
 INSERT INTO priceHist VALUES('2010-12-01','MP0004', 302);
 INSERT INTO priceHist VALUES('2011-02-01','NB0005', 1184.72);
 
+-- 4. CRUD DEMO & CONSTRAINTS
 
 -- =====================================================================
 -- AUDIT TRAIL + SOFT DELETE  (standard PostgreSQL)
