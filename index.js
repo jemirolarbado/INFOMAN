@@ -2504,59 +2504,26 @@ function syncSidebarNav() {
   }
 }
 
-  function setActiveS4Nav(activeKey) {
+ 
+function setActiveS4Nav(activeKey) {
   syncSidebarNav();
 
-  Array.prototype.forEach.call(document.querySelectorAll('.side .nav'), function(btn) {
-    var s4k = btn.getAttribute('data-s4-nav');
-    var on = !!activeKey && s4k === activeKey;
-
-    btn.classList.toggle('on', on);
-
-    if (on) btn.setAttribute('aria-current', 'page');
-    else if (s4k) btn.removeAttribute('aria-current');
-  });
-}
-
-    var salesBtn = document.createElement('button');
-    salesBtn.type = 'button';
-    salesBtn.className = 'nav';
-    salesBtn.setAttribute('data-s4-nav', 'sales');
-    salesBtn.innerHTML = ic('box', 20) + '<span>Sales</span>';
-
-    var reportsBtn = document.createElement('button');
-    reportsBtn.type = 'button';
-    reportsBtn.className = 'nav';
-    reportsBtn.setAttribute('data-s4-nav', 'reports');
-    reportsBtn.innerHTML = ic('check', 20) + '<span>Reports</span>';
-
-    var hrBtn = navs.filter(function (b) { return b.textContent.trim() === 'Human Resources'; })[0];
-    if (hrBtn && hrBtn.parentNode) {
-      hrBtn.insertAdjacentElement('afterend', salesBtn);
-      salesBtn.insertAdjacentElement('afterend', reportsBtn);
-    }
-
-    if (adm() && adminLabel) {
-      var auditBtn = document.createElement('button');
-      auditBtn.type = 'button';
-      auditBtn.className = 'nav';
-      auditBtn.setAttribute('data-s4-nav', 'audit');
-      auditBtn.innerHTML = ic('search', 20) + '<span>Audit Log</span>';
-      adminLabel.insertAdjacentElement('afterend', auditBtn);
-    }
-  }
-
-  function setActiveS4Nav(activeKey) {
-    syncSidebarNav();
-    Array.prototype.forEach.call(document.querySelectorAll('.side .nav'), function (btn) {
+  Array.prototype.forEach.call(
+    document.querySelectorAll('.side .nav'),
+    function(btn) {
       var s4k = btn.getAttribute('data-s4-nav');
       var on = !!activeKey && s4k === activeKey;
-      btn.classList.toggle('on', on);
-      if (on) btn.setAttribute('aria-current', 'page');
-      else if (s4k) btn.removeAttribute('aria-current');
-    });
-  }
 
+      btn.classList.toggle('on', on);
+
+      if (on) {
+        btn.setAttribute('aria-current', 'page');
+      } else if (s4k) {
+        btn.removeAttribute('aria-current');
+      }
+    }
+  );
+}
   function roleHeaderBadge() {
     var role = S && S.me ? S.me.role : 'User';
     var cls = role === 'Superadmin' ? 'b-super' : role === 'Admin' ? 'b-admin' : 'b-user';
