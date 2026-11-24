@@ -11,6 +11,8 @@ DROP TABLE IF EXISTS payment CASCADE;
 DROP TABLE IF EXISTS priceHist CASCADE;
 DROP TABLE IF EXISTS audit_log CASCADE;
 
+-- 2. TABLE CREATION
+
 -- Create customer table 
 CREATE TABLE employee (empno VARCHAR(5) NOT NULL PRIMARY KEY, 
 												lastname VARCHAR(15),  
