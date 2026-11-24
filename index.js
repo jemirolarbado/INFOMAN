@@ -3694,4 +3694,4 @@ function roleHeaderBadge() {
   window.addEventListener('beforeunload', function () {
     clearInterval(navTimer);
   });
-})(window);
+})
