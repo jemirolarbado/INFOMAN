@@ -456,7 +456,9 @@ CREATE TABLE salesDetail (transNo VARCHAR(8) NOT NULL REFERENCES sales,
 													quantity DECIMAL(10,2) CONSTRAINT quantity_ck 
 													CHECK (quantity >= 0.0), 
 													PRIMARY KEY (transNo, prodCode));
-													
+
+-- 3. DATA INSERTION
+
 -- Insert salesDETAIL rows 
 INSERT INTO salesDetail VALUES('TR000001','AK0002', 10);
 INSERT INTO salesDetail VALUES('TR000001','AM0003', 10);
