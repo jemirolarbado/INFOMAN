@@ -2477,15 +2477,32 @@
     return 'OR' + ('000000' + (maxNum + 1)).slice(-6);
   }
 
-  function syncSidebarNav() {
-    if (!S || !S.me) return;
-    var side = document.querySelector('.side');
-    if (!side || side.querySelector('[data-s4-nav]')) return;
+  
+function syncSidebarNav() {
+  if (!S || !S.me) return;
 
-    var navs = Array.prototype.slice.call(side.querySelectorAll('.nav'));
-    var adminLabel = Array.prototype.slice.call(side.querySelectorAll('.side-label')).filter(function (el) {
+  var side = document.querySelector('.side');
+  if (!side) return;
+
+  // Keep Audit Log for Admin and Superadmin.
+  if (adm() && !side.querySelector('[data-s4-nav="audit"]')) {
+    var adminLabel = Array.prototype.slice.call(
+      side.querySelectorAll('.side-label')
+    ).filter(function(el) {
       return el.textContent.trim().toLowerCase() === 'administration';
     })[0];
+
+    if (adminLabel) {
+      var auditBtn = document.createElement('button');
+      auditBtn.type = 'button';
+      auditBtn.className = 'nav';
+      auditBtn.setAttribute('data-s4-nav', 'audit');
+      auditBtn.innerHTML = ic('search', 20) + '<span>Audit Log</span>';
+
+      adminLabel.insertAdjacentElement('afterend', auditBtn);
+    }
+  }
+}
 
     var salesBtn = document.createElement('button');
     salesBtn.type = 'button';
