@@ -2140,6 +2140,7 @@
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
 
+
   /* ==========================================================================
    SPRINT 4: Sales, Payments, Reports & Audit Log
    Plugs into window.HopeERP without modifying existing Sprint 1-3 code.
@@ -2155,11 +2156,6 @@
   var S4_KEY = 'hope_erp_sprint4_v1';
   var toastTimer = null;
   var searchTimer = null;
-
-  var oDash = H.views.dashboard;
-  var oUsers = H.views.users;
-  H.views.dashboard = function (s) { S = s; return oDash(s); };
-  H.views.users = function (s) { S = s; return oUsers(s); };
 
   var REPORTS_DEF = [
     { id: 'top_customers', name: 'Top Customers', right: 'reports:0', desc: 'Who buys the most?' },
@@ -2218,7 +2214,6 @@
     return m ? '<span class="stamp"><b>' + esc(m[1]) + '</b><br>' + esc(m[2]) + '</span>' : esc(s || '-');
   }
 
-  /* Access Sprint 2 & Sprint 3 local collections seamlessly for calculations & reports */
   function getSalesDataStore() {
     var custs = [], prods = [], prices = [];
     try {
@@ -2370,13 +2365,13 @@
   }
 
   var V4 = {
-    view: 'sales', /* 'sales' | 'reports' | 'audit' */
+    view: 'sales',
     tab: 'active',
     payFilter: 'all',
     q: '',
     page: 1,
     perPage: 20,
-    dlg: null, /* { kind: 'saleForm'|'saleDetails'|'confirm', ... } */
+    dlg: null,
     repId: 'top_customers',
     repFilters: {
       from: '2010-06-27',
@@ -2482,7 +2477,6 @@
     return 'OR' + ('000000' + (maxNum + 1)).slice(-6);
   }
 
-  /* Ensure Sales, Reports, and Audit Log appear in sidebar */
   function syncSidebarNav() {
     if (!S || !S.me) return;
     var side = document.querySelector('.side');
@@ -2538,7 +2532,6 @@
     return '<span class="badge ' + cls + '">' + esc(role) + '</span>';
   }
 
-  /* ---------------- SALES LIST & NEW SALE ---------------- */
   function filteredSales() {
     var store = getSalesDataStore();
     var a = adm();
@@ -2673,7 +2666,6 @@
     document.title = 'Sales Management — Hope, Inc. ERP';
   }
 
-  /* ---------------- REPORTS (ALL 7 + PRINT/PDF) ---------------- */
   function buildReportSheet(repId) {
     var store = getSalesDataStore();
     var f = V4.repFilters;
@@ -2870,7 +2862,6 @@
     document.title = 'Reports — Hope, Inc. ERP';
   }
 
-  /* ---------------- AUDIT LOG (ADMIN / SUPERADMIN ONLY) ---------------- */
   function filteredAudit() {
     var f = V4.auditFilters;
     var byQ = f.by.trim().toLowerCase();
@@ -2952,7 +2943,6 @@
     document.title = 'Audit Log — Hope, Inc. ERP';
   }
 
-  /* ---------------- SALE MODALS (NEW/EDIT SALE & SALE DETAILS) ---------------- */
   function renderS4Modal() {
     var host = document.getElementById('s4-host');
     if (!host) {
@@ -3374,47 +3364,65 @@
     toast('Payment ' + orno + ' recorded.');
   }
 
-  /* ---------------- EVENT DELEGATION ---------------- */
+  function openS4View(targetView) {
+    if (!S || !S.me) return false;
+    V4.view = targetView;
+    V4.dlg = null;
+    renderS4Modal();
+    if (targetView === 'sales') renderSalesView();
+    else if (targetView === 'reports') renderReportsView();
+    else if (targetView === 'audit') renderAuditView();
+    return true;
+  }
+
+  /* Wrap H.views so S is always captured and sidebar stays synced */
+  if (H.views) {
+    Object.keys(H.views).forEach(function (viewName) {
+      var orig = H.views[viewName];
+      if (typeof orig === 'function') {
+        H.views[viewName] = function (s) {
+          if (s) S = s;
+          var res = orig.apply(this, arguments);
+          setTimeout(function () {
+            if (S && S.me) {
+              syncSidebarNav();
+              if (document.querySelector('[data-s4-nav]')) {
+                setActiveS4Nav(null);
+              }
+            }
+          }, 0);
+          return res;
+        };
+      }
+    });
+  }
+
+  /* Capture phase intercepts clicks before Sprint 2's stub handler shows "later sprint" */
   document.addEventListener('click', function (e) {
     var navBtn = e.target.closest('[data-s4-nav]');
     if (navBtn) {
-      if (!S || !S.me) return;
-      var targetView = navBtn.getAttribute('data-s4-nav');
-      V4.view = targetView;
-      V4.dlg = null;
-      renderS4Modal();
-      if (targetView === 'sales') renderSalesView();
-      else if (targetView === 'reports') renderReportsView();
-      else if (targetView === 'audit') renderAuditView();
+      var v = navBtn.getAttribute('data-s4-nav');
+      if (openS4View(v)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
       return;
     }
 
     var stubEl = e.target.closest('[data-act="stub"]');
-    if (stubEl && S && S.me) {
+    if (stubEl) {
       var arg = stubEl.getAttribute('data-arg');
-      if (arg === 'Sales') {
+      var mapArg = { 'Sales': 'sales', 'Reports': 'reports', 'Audit Log': 'audit' };
+      if (mapArg[arg] && openS4View(mapArg[arg])) {
+        e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        V4.view = 'sales';
-        renderSalesView();
-        return;
-      }
-      if (arg === 'Reports') {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        V4.view = 'reports';
-        renderReportsView();
-        return;
-      }
-      if (arg === 'Audit Log') {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        V4.view = 'audit';
-        renderAuditView();
-        return;
       }
     }
+  }, true);
 
+  document.addEventListener('click', function (e) {
     var actEl = e.target.closest('[data-s4]');
     if (!actEl) return;
     var act = actEl.getAttribute('data-s4');
@@ -3677,13 +3685,13 @@
     }
   });
 
-  /* Inject Sprint 4 sidebar links whenever dashboard or user management renders */
-  var obs = new MutationObserver(function () {
+  var navTimer = setInterval(function () {
     if (S && S.me && document.querySelector('.side')) {
       syncSidebarNav();
     }
-  });
-  obs.observe(document.body, { childList: true, subtree: true });
-})(window);
-})(window);
+  }, 400);
 
+  window.addEventListener('beforeunload', function () {
+    clearInterval(navTimer);
+  });
+})(window);
