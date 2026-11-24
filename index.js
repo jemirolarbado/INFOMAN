@@ -2478,6 +2478,7 @@
   }
 
   
+
 function syncSidebarNav() {
   if (!S || !S.me) return;
 
@@ -2504,7 +2505,6 @@ function syncSidebarNav() {
   }
 }
 
- 
 function setActiveS4Nav(activeKey) {
   syncSidebarNav();
 
@@ -2524,11 +2524,13 @@ function setActiveS4Nav(activeKey) {
     }
   );
 }
-  function roleHeaderBadge() {
-    var role = S && S.me ? S.me.role : 'User';
-    var cls = role === 'Superadmin' ? 'b-super' : role === 'Admin' ? 'b-admin' : 'b-user';
-    return '<span class="badge ' + cls + '">' + esc(role) + '</span>';
-  }
+
+function roleHeaderBadge() {
+  var role = S && S.me ? S.me.role : 'User';
+  var cls = role === 'Superadmin' ? 'b-super' : role === 'Admin' ? 'b-admin' : 'b-user';
+  return '<span class="badge ' + cls + '">' + esc(role) + '</span>';
+}
+
 
   function filteredSales() {
     var store = getSalesDataStore();
