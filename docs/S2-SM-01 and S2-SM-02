@@ -1,0 +1,19 @@
+# Sprint 2 Planning Notes & Sprint 1 Retro Follow-Up
+
+**Project:** Hope, Inc. ERP System (`INFOMAN`)  
+**Sprint:** Sprint 2 (Weeks 3–4)  
+**Scrum Master:** Jemirol Arbado  
+
+## Sprint 2 Goal
+Consolidate authentication and core UI screens into a unified frontend structure (`index.html`), implement password recovery UI (`reset-password.html`), and enforce standardized GitHub issue/PR tracking across all roles.
+
+## Follow-Up on Sprint 1 Retrospective Actions (`-02`)
+- [x] **Standardized Branching & PR Workflow:** Established branch naming conventions (`feature/...`, `fix/...`, `docs/...`) and required linked issues before merging.
+- [x] **Repository Documentation Structure:** Centralized all Scrum artifacts inside `/docs` and updated `README.md` with clear setup and contribution guidelines.
+- [x] **Issue & Sub-Issue Tracking:** Broken down large features (e.g., Password Reset `#93` → `#94`) to separate completed frontend layouts from upcoming Supabase backend tasks.
+
+## Sprint 2 Backlog Assignments
+- **UI/UX Designer:** Empty, error, and confirm-delete states; usability review of built screens.
+- **Developers:** Unified `index.html` auth view consolidation, `reset-password.html` layout, and registration password field validation (`#97`).
+- **QA / Tester:** Functional verification of login, registration, and password reset flows.
+- **Scrum Master:** Sprint 2 board setup, impediment tracking, velocity/burndown updates, and Sprint 2 Review/Retrospective documentation.
