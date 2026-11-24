@@ -1,0 +1,13 @@
+# Sprint 1 Review and Retrospective Report
+
+## WHAT HAS BEEN ACHIEVED
+- Most of the team's respective sprints are done.
+- UI/UX/Web Design is complete with a clean layout inspired by the original Hope DB.
+- Database has been set up and is ready to take data and tables.
+- The developer brought the website frontend to life.
+
+## PROBLEMS AND PLANS FOR NEXT SPRINTS
+- There is no working password section yet.
+- Supabase is not connected yet.
+- Pull requests and branch management were messy during this sprint.
+- The plan for the next sprint is to fix existing bugs, connect Supabase, and clean up our PR workflow.
