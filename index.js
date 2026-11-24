@@ -2139,5 +2139,1551 @@
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
+
+  /* ==========================================================================
+   SPRINT 4: Sales, Payments, Reports & Audit Log
+   Plugs into window.HopeERP without modifying existing Sprint 1-3 code.
+   ========================================================================== */
+(function (window) {
+  'use strict';
+  var H = window.HopeERP;
+  if (!H) return;
+
+  var db = window.supabaseClient;
+  var esc = H.esc;
+  var S = null;
+  var S4_KEY = 'hope_erp_sprint4_v1';
+  var toastTimer = null;
+  var searchTimer = null;
+
+  var oDash = H.views.dashboard;
+  var oUsers = H.views.users;
+  H.views.dashboard = function (s) { S = s; return oDash(s); };
+  H.views.users = function (s) { S = s; return oUsers(s); };
+
+  var REPORTS_DEF = [
+    { id: 'top_customers', name: 'Top Customers', right: 'reports:0', desc: 'Who buys the most?' },
+    { id: 'product_master', name: 'Product Master List', right: 'reports:1', desc: 'What do we sell, at what current price?' },
+    { id: 'top_products', name: 'Top Products', right: 'reports:2', desc: 'Which products earn the most (quantity and amount)?' },
+    { id: 'active_employees', name: 'Active Employees', right: 'reports:3', desc: 'Who works here now? (no separation date)' },
+    { id: 'all_employees', name: 'All Employees', right: 'reports:4', desc: 'Everyone, including those who left' },
+    { id: 'emp_history', name: 'Employee Job History', right: 'reports:5', desc: "How did one person's job and salary change?" },
+    { id: 'top_sales', name: 'Top Sales', right: 'reports:6', desc: 'Which single sales are the biggest?' }
+  ];
+
+  var I = {
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    x: '<path d="M6 6 18 18M18 6 6 18"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="3"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/>',
+    check: '<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>',
+    box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'
+  };
+
+  function ic(name, size) {
+    size = size || 18;
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (I[name] || '') + '</svg>';
+  }
+
+  function p2(n) { return (n < 10 ? '0' : '') + n; }
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+  }
+  function ts() {
+    var d = new Date(), h = d.getHours();
+    return today() + ' ' + (h % 12 || 12) + ':' + p2(d.getMinutes()) + ' ' + (h < 12 ? 'AM' : 'PM');
+  }
+  function money(n) {
+    return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function adm() { return !!(S && S.me && S.me.role !== 'User'); }
+  function can(r) {
+    if (!S || !S.me) return false;
+    if (S.me.role !== 'User') return true;
+    return (S.me.rights || []).indexOf(r) > -1;
+  }
+  function toast(msg, err) {
+    var el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.toggle('err', !!err);
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, err ? 5000 : 3000);
+  }
+  function stamp(s) {
+    var m = /^(.*?) (\d{4}-\d{2}-\d{2} .*)$/.exec(s || '');
+    return m ? '<span class="stamp"><b>' + esc(m[1]) + '</b><br>' + esc(m[2]) + '</span>' : esc(s || '-');
+  }
+
+  /* Access Sprint 2 & Sprint 3 local collections seamlessly for calculations & reports */
+  function getSalesDataStore() {
+    var custs = [], prods = [], prices = [];
+    try {
+      if (window.localStorage.getItem('hope_erp_s2_v1')) {
+        var s2 = JSON.parse(window.localStorage.getItem('hope_erp_s2_v1'));
+        custs = s2.customers || [];
+        prods = s2.products || [];
+        prices = s2.prices || [];
+      }
+    } catch (e) {}
+    if (!custs.length) {
+      custs = [
+        { custno: 'C0001', custname: 'Globus Medical, Inc', address: '2560 Gen Armistead Ave Audubon CA 94031', payterm: '30D', is_deleted: false },
+        { custno: 'C0003', custname: 'Trisha Macdowell', address: '7642 Clairemont Mesa Blvd San Diego CA 90321', payterm: 'COD', is_deleted: false },
+        { custno: 'C0004', custname: 'HMS Holdings, Inc', address: '1000 So Fremont Ave Alhambra CA 91303', payterm: '45D', is_deleted: true },
+        { custno: 'C0009', custname: 'Landec Corp.', address: '3603 Haven Avenue Menlo Park CA 94025', payterm: '30D', is_deleted: false },
+        { custno: 'C0046', custname: 'Oxford Academy', address: 'Cypress CA 90630', payterm: '30D', is_deleted: false },
+        { custno: 'C0077', custname: 'Office NY Tech Serv', address: 'New York NY', payterm: '30D', is_deleted: false },
+        { custno: 'C0078', custname: 'FDA New York', address: 'New York NY', payterm: '30D', is_deleted: false },
+        { custno: 'C0080', custname: 'Social Sec Admn CA', address: 'Sacramento CA', payterm: '30D', is_deleted: false },
+        { custno: 'C0081', custname: 'Dept Food and Agri', address: 'Sacramento CA', payterm: '30D', is_deleted: false },
+        { custno: 'C0082', custname: 'California Dept Tech', address: 'Sacramento CA', payterm: '30D', is_deleted: false }
+      ];
+    }
+    if (!prods.length) {
+      prods = [
+        { prodcode: 'AD0001', description: 'Toshiba Canvio 1 TB', unit: 'ea', is_deleted: false },
+        { prodcode: 'NB0001', description: 'Dell Inspiron Laptop', unit: 'ea', is_deleted: false },
+        { prodcode: 'NB0005', description: 'Apple Mac Pro Laptop', unit: 'ea', is_deleted: false },
+        { prodcode: 'PC0002', description: 'Dell 745 Opti Desk', unit: 'pc', is_deleted: false },
+        { prodcode: 'PC0004', description: 'Dell Inspiron 660', unit: 'pc', is_deleted: false },
+        { prodcode: 'PR0001', description: 'Epson Expression', unit: 'pc', is_deleted: false },
+        { prodcode: 'PS0001', description: 'VirServ 12Core 128GB', unit: 'ea', is_deleted: false },
+        { prodcode: 'MP0003', description: 'SAMSUNG GALAXY S4', unit: 'ea', is_deleted: false }
+      ];
+    }
+    if (!prices.length) {
+      prices = [
+        { prodcode: 'AD0001', effdate: '2010-01-01', unitprice: 58.00, is_deleted: false },
+        { prodcode: 'NB0001', effdate: '2010-01-01', unitprice: 300.00, is_deleted: false },
+        { prodcode: 'NB0005', effdate: '2010-01-01', unitprice: 1184.72, is_deleted: false },
+        { prodcode: 'PC0002', effdate: '2010-01-01', unitprice: 196.78, is_deleted: false },
+        { prodcode: 'PC0004', effdate: '2010-01-01', unitprice: 538.00, is_deleted: false },
+        { prodcode: 'PR0001', effdate: '2010-01-01', unitprice: 81.72, is_deleted: false },
+        { prodcode: 'PS0001', effdate: '2010-01-01', unitprice: 3200.00, is_deleted: false },
+        { prodcode: 'MP0003', effdate: '2010-01-01', unitprice: 425.00, is_deleted: false }
+      ];
+    }
+
+    var hr = { jobs: [], depts: [], emps: [], hist: [] };
+    try {
+      if (window.localStorage.getItem('hope_erp_hr_v1')) {
+        hr = JSON.parse(window.localStorage.getItem('hope_erp_hr_v1'));
+      }
+    } catch (e) {}
+    if (!hr.emps || !hr.emps.length) {
+      hr = {
+        jobs: [
+          { jobcode: 'PRES', jobdesc: 'President' },
+          { jobcode: 'VP', jobdesc: 'Vice president' },
+          { jobcode: 'MGR', jobdesc: 'Manager' },
+          { jobcode: 'SA1', jobdesc: 'Sales Agent 1' },
+          { jobcode: 'SA2', jobdesc: 'Sales Agent 2' },
+          { jobcode: 'PR1', jobdesc: 'Programmer 1' },
+          { jobcode: 'ANL', jobdesc: 'Analyst' }
+        ],
+        depts: [
+          { deptcode: 'ACT', deptname: 'Accounting' },
+          { deptcode: 'BR1', deptname: 'Sales Branch 1' },
+          { deptcode: 'EXC', deptname: 'Executive' },
+          { deptcode: 'IT', deptname: 'Information Tech' }
+        ],
+        emps: [
+          { empno: '00001', lastname: 'Smith', firstname: 'John', gender: 'M', birthdate: '1985-02-20', hiredate: '2010-05-11', sepdate: '' },
+          { empno: '00005', lastname: 'King', firstname: 'Don', gender: 'M', birthdate: '1986-02-14', hiredate: '2010-06-23', sepdate: '' },
+          { empno: '00007', lastname: 'Jenskin', firstname: 'Floyd', gender: 'M', birthdate: '1990-02-20', hiredate: '2010-05-30', sepdate: '' },
+          { empno: '00015', lastname: 'Zulueta', firstname: 'Maggie', gender: 'F', birthdate: '1990-08-03', hiredate: '2010-07-05', sepdate: '2011-03-30' }
+        ],
+        hist: [
+          { empno: '00001', jobcode: 'PR1', deptcode: 'IT', effdate: '2010-05-11', salary: 48000, del: false },
+          { empno: '00005', jobcode: 'SA1', deptcode: 'BR1', effdate: '2010-06-23', salary: 36000, del: false },
+          { empno: '00005', jobcode: 'SA2', deptcode: 'BR1', effdate: '2011-01-02', salary: 38000, del: false },
+          { empno: '00007', jobcode: 'ANL', deptcode: 'IT', effdate: '2010-05-30', salary: 55000, del: false },
+          { empno: '00015', jobcode: 'SA1', deptcode: 'BR1', effdate: '2010-07-05', salary: 36000, del: false }
+        ]
+      };
+    }
+
+    return { customers: custs, products: prods, prices: prices, hr: hr };
+  }
+
+  function seedS4() {
+    var st = 'ADD system 2026-10-12 09:00 AM';
+    return {
+      sales: [
+        { transno: 'TR000002', saledate: '2010-07-05', custno: 'C0003', empno: '00005', is_deleted: false, stamp: st },
+        { transno: 'TR000004', saledate: '2010-07-07', custno: 'C0004', empno: '00005', is_deleted: true, stamp: 'DELETE Lisa Park 2026-11-06 10:02 AM' },
+        { transno: 'TR000104', saledate: '2011-03-30', custno: 'C0009', empno: '00005', is_deleted: false, stamp: st },
+        { transno: 'TR000120', saledate: '2011-04-10', custno: 'C0078', empno: '00005', is_deleted: false, stamp: st },
+        { transno: 'TR000123', saledate: '2011-04-12', custno: 'C0081', empno: '00005', is_deleted: false, stamp: st },
+        { transno: 'TR000124', saledate: '2011-04-15', custno: 'C0082', empno: '00005', is_deleted: false, stamp: st }
+      ],
+      lines: [
+        { transno: 'TR000002', prodcode: 'NB0001', qty: 5, unitprice: 300.00, is_deleted: false, stamp: st },
+        { transno: 'TR000002', prodcode: 'PR0001', qty: 1, unitprice: 81.72, is_deleted: false, stamp: st },
+        { transno: 'TR000104', prodcode: 'PC0004', qty: 7, unitprice: 538.00, is_deleted: false, stamp: st },
+        { transno: 'TR000104', prodcode: 'PR0001', qty: 16, unitprice: 81.72, is_deleted: false, stamp: st },
+        { transno: 'TR000120', prodcode: 'PS0001', qty: 32, unitprice: 3240.88, is_deleted: false, stamp: st },
+        { transno: 'TR000123', prodcode: 'NB0005', qty: 35, unitprice: 1197.11, is_deleted: false, stamp: st },
+        { transno: 'TR000124', prodcode: 'PC0004', qty: 33, unitprice: 541.61, is_deleted: false, stamp: st }
+      ],
+      payments: [
+        { orno: 'OR000002', transno: 'TR000002', paydate: '2010-07-05', amount: 1581.72, is_deleted: false, stamp: st },
+        { orno: 'OR000154', transno: 'TR000104', paydate: '2011-04-30', amount: 3000.00, is_deleted: false, stamp: st },
+        { orno: 'OR000120', transno: 'TR000120', paydate: '2011-04-10', amount: 103708.17, is_deleted: false, stamp: st },
+        { orno: 'OR000123', transno: 'TR000123', paydate: '2011-04-12', amount: 41898.90, is_deleted: false, stamp: st },
+        { orno: 'OR000124', transno: 'TR000124', paydate: '2011-04-15', amount: 17872.99, is_deleted: false, stamp: st }
+      ],
+      audit: [
+        { id: 1, when: '2026-11-07 2:30 PM', action: 'DELETE', table: 'salesdetail', record: 'TR000010 | AP0001', by: 'Lisa Park', changes: [{ col: 'QUANTITY', before: '2', after: 'deleted' }] },
+        { id: 2, when: '2026-11-06 10:02 AM', action: 'DELETE', table: 'sales', record: 'TR000004', by: 'Lisa Park', changes: [{ col: 'STATUS', before: 'Active', after: 'Inactive' }] },
+        { id: 3, when: '2026-11-05 10:20 AM', action: 'EDIT', table: 'customer', record: 'C0007', by: 'David Kim', changes: [{ col: 'PAYTERM', before: 'COD', after: '30D' }] },
+        { id: 4, when: '2026-11-05 10:20 AM', action: 'EDIT', table: 'employee', record: '00007', by: 'David Kim', changes: [{ col: 'LASTNAME', before: 'Jenkins', after: 'Jenskin' }] }
+      ]
+    };
+  }
+
+  var D4;
+  try { D4 = JSON.parse(window.localStorage.getItem(S4_KEY)); } catch (e) { D4 = null; }
+  if (!D4 || !Array.isArray(D4.sales)) D4 = seedS4();
+
+  function saveS4() {
+    try { window.localStorage.setItem(S4_KEY, JSON.stringify(D4)); } catch (e) {}
+  }
+
+  function pushAudit(action, tableName, recordKey, changes) {
+    var by = S && S.me ? H.fullName(S.me) : 'system';
+    var nextId = D4.audit.reduce(function (m, x) { return Math.max(m, x.id || 0); }, 0) + 1;
+    D4.audit.unshift({
+      id: nextId,
+      when: ts(),
+      action: action,
+      table: tableName,
+      record: recordKey,
+      by: by,
+      changes: changes || []
+    });
+    saveS4();
+  }
+
+  var V4 = {
+    view: 'sales', /* 'sales' | 'reports' | 'audit' */
+    tab: 'active',
+    payFilter: 'all',
+    q: '',
+    page: 1,
+    perPage: 20,
+    dlg: null, /* { kind: 'saleForm'|'saleDetails'|'confirm', ... } */
+    repId: 'top_customers',
+    repFilters: {
+      from: '2010-06-27',
+      to: '2020-10-25',
+      topN: 5,
+      empno: '00005'
+    },
+    repRan: true,
+    auditFilters: {
+      table: 'all',
+      action: 'all',
+      by: '',
+      record: '',
+      from: '',
+      to: '',
+      expandedId: null
+    }
+  };
+
+  function priceOnDate(prodcode, dateStr, pricesList) {
+    var list = (pricesList || getSalesDataStore().prices).filter(function (p) {
+      return p.prodcode === prodcode && !p.is_deleted && (!dateStr || p.effdate <= dateStr);
+    }).sort(function (a, b) {
+      return a.effdate < b.effdate ? 1 : a.effdate > b.effdate ? -1 : 0;
+    });
+    return list[0] ? Number(list[0].unitprice) : 0;
+  }
+
+  function calcSale(sale) {
+    var activeLines = D4.lines.filter(function (l) {
+      return l.transno === sale.transno && !l.is_deleted;
+    });
+    var activePays = D4.payments.filter(function (p) {
+      return p.transno === sale.transno && !p.is_deleted;
+    });
+    var total = sale.is_deleted ? 0 : activeLines.reduce(function (sum, l) {
+      var unitPrice = l.unitprice != null ? Number(l.unitprice) : priceOnDate(l.prodcode, sale.saledate);
+      return sum + (Number(l.qty) || 0) * unitPrice;
+    }, 0);
+    var paid = activePays.reduce(function (sum, p) {
+      return sum + (Number(p.amount) || 0);
+    }, 0);
+    var balance = total - paid;
+    var status = 'No lines';
+    var chipClass = 'p-none';
+
+    if (activeLines.length === 0 && total === 0) {
+      status = 'No lines';
+      chipClass = 'p-none';
+    } else if (Math.abs(balance) < 0.005) {
+      status = 'Paid';
+      chipClass = 'p-paid';
+    } else if (balance < 0) {
+      status = 'Overpaid';
+      chipClass = 'p-overpaid';
+    } else if (paid > 0) {
+      status = 'Partial';
+      chipClass = 'p-partial';
+    } else {
+      status = 'Unpaid';
+      chipClass = 'p-unpaid';
+    }
+
+    return {
+      total: Number(total.toFixed(2)),
+      paid: Number(paid.toFixed(2)),
+      balance: Number(balance.toFixed(2)),
+      status: status,
+      chipClass: chipClass,
+      lineCount: activeLines.length,
+      payCount: activePays.length
+    };
+  }
+
+  function paymentChip(calc, isDeleted) {
+    if (isDeleted) return '<span class="pchip p-none">-</span>';
+    return '<span class="pchip ' + calc.chipClass + '">' + esc(calc.status) + '</span>';
+  }
+
+  function custLabel(custno, store) {
+    var c = (store || getSalesDataStore()).customers.filter(function (x) { return x.custno === custno; })[0];
+    return c ? c.custname : custno;
+  }
+
+  function empLabel(empno, store) {
+    var e = (store || getSalesDataStore()).hr.emps.filter(function (x) { return x.empno === empno; })[0];
+    return e ? (e.firstname + ' ' + e.lastname) : empno;
+  }
+
+  function nextTransNo() {
+    var maxNum = D4.sales.reduce(function (m, s) {
+      var n = parseInt(String(s.transno || '').replace(/\D/g, ''), 10) || 0;
+      return Math.max(m, n);
+    }, 0);
+    return 'TR' + ('000000' + (maxNum + 1)).slice(-6);
+  }
+
+  function nextOrNo() {
+    var maxNum = D4.payments.reduce(function (m, p) {
+      var n = parseInt(String(p.orno || '').replace(/\D/g, ''), 10) || 0;
+      return Math.max(m, n);
+    }, 165);
+    return 'OR' + ('000000' + (maxNum + 1)).slice(-6);
+  }
+
+  /* Ensure Sales, Reports, and Audit Log appear in sidebar */
+  function syncSidebarNav() {
+    if (!S || !S.me) return;
+    var side = document.querySelector('.side');
+    if (!side || side.querySelector('[data-s4-nav]')) return;
+
+    var navs = Array.prototype.slice.call(side.querySelectorAll('.nav'));
+    var adminLabel = Array.prototype.slice.call(side.querySelectorAll('.side-label')).filter(function (el) {
+      return el.textContent.trim().toLowerCase() === 'administration';
+    })[0];
+
+    var salesBtn = document.createElement('button');
+    salesBtn.type = 'button';
+    salesBtn.className = 'nav';
+    salesBtn.setAttribute('data-s4-nav', 'sales');
+    salesBtn.innerHTML = ic('box', 20) + '<span>Sales</span>';
+
+    var reportsBtn = document.createElement('button');
+    reportsBtn.type = 'button';
+    reportsBtn.className = 'nav';
+    reportsBtn.setAttribute('data-s4-nav', 'reports');
+    reportsBtn.innerHTML = ic('check', 20) + '<span>Reports</span>';
+
+    var hrBtn = navs.filter(function (b) { return b.textContent.trim() === 'Human Resources'; })[0];
+    if (hrBtn && hrBtn.parentNode) {
+      hrBtn.insertAdjacentElement('afterend', salesBtn);
+      salesBtn.insertAdjacentElement('afterend', reportsBtn);
+    }
+
+    if (adm() && adminLabel) {
+      var auditBtn = document.createElement('button');
+      auditBtn.type = 'button';
+      auditBtn.className = 'nav';
+      auditBtn.setAttribute('data-s4-nav', 'audit');
+      auditBtn.innerHTML = ic('search', 20) + '<span>Audit Log</span>';
+      adminLabel.insertAdjacentElement('afterend', auditBtn);
+    }
+  }
+
+  function setActiveS4Nav(activeKey) {
+    syncSidebarNav();
+    Array.prototype.forEach.call(document.querySelectorAll('.side .nav'), function (btn) {
+      var s4k = btn.getAttribute('data-s4-nav');
+      var on = !!activeKey && s4k === activeKey;
+      btn.classList.toggle('on', on);
+      if (on) btn.setAttribute('aria-current', 'page');
+      else if (s4k) btn.removeAttribute('aria-current');
+    });
+  }
+
+  function roleHeaderBadge() {
+    var role = S && S.me ? S.me.role : 'User';
+    var cls = role === 'Superadmin' ? 'b-super' : role === 'Admin' ? 'b-admin' : 'b-user';
+    return '<span class="badge ' + cls + '">' + esc(role) + '</span>';
+  }
+
+  /* ---------------- SALES LIST & NEW SALE ---------------- */
+  function filteredSales() {
+    var store = getSalesDataStore();
+    var a = adm();
+    var q = V4.q.trim().toLowerCase();
+
+    return D4.sales
+      .slice()
+      .sort(function (x, y) { return x.transno < y.transno ? 1 : x.transno > y.transno ? -1 : 0; })
+      .filter(function (s) {
+        if (!a && s.is_deleted) return false;
+        if (a) {
+          if (V4.tab === 'active' && s.is_deleted) return false;
+          if (V4.tab === 'inactive' && !s.is_deleted) return false;
+        }
+        var calc = calcSale(s);
+        if (V4.payFilter !== 'all' && calc.status.toLowerCase() !== V4.payFilter) return false;
+        if (!q) return true;
+        var hay = [
+          s.transno,
+          s.saledate,
+          s.custno,
+          custLabel(s.custno, store),
+          s.empno,
+          empLabel(s.empno, store),
+          calc.status
+        ].join(' ').toLowerCase();
+        return hay.indexOf(q) > -1;
+      });
+  }
+
+  function salesTableHtml(rows, store) {
+    var a = adm();
+    var start = (V4.page - 1) * V4.perPage;
+    var slice = rows.slice(start, start + V4.perPage);
+
+    if (!slice.length) {
+      return '<div class="s2-empty"><span class="icon-tile">' + ic('search', 24) + '</span>' +
+        '<h3>No sales match</h3><p>Try another search or payment filter.</p>' +
+        '<button type="button" class="btn btn-outline" data-s4="clear-sales">Clear search and filter</button></div>';
+    }
+
+    var head = '<th>TRANS NO</th><th>DATE</th><th>CUSTOMER · SOLD BY</th><th class="num">TOTAL</th><th class="num">BALANCE</th><th>PAYMENT</th>' +
+      (a ? '<th>STATUS · LAST CHANGE</th>' : '') + '<th>ACTIONS</th>';
+
+    var body = slice.map(function (s) {
+      var calc = calcSale(s);
+      var custName = custLabel(s.custno, store);
+      var empName = empLabel(s.empno, store);
+      var trNo = esc(s.transno);
+
+      var acts = '<button type="button" class="btn btn-soft btn-xs" data-s4="details" data-a="' + trNo + '">Details</button>';
+      if (s.is_deleted) {
+        if (a) acts += '<button type="button" class="btn btn-soft btn-xs" data-s4="restore-sale" data-a="' + trNo + '">Restore</button>';
+      } else {
+        if (can('sales:1')) acts += '<button type="button" class="btn btn-outline btn-xs" data-s4="edit-sale" data-a="' + trNo + '">Edit</button>';
+        if (can('sales:2')) acts += '<button type="button" class="btn btn-danger btn-xs" data-s4="del-sale" data-a="' + trNo + '">Delete</button>';
+      }
+
+      return '<tr class="' + (s.is_deleted ? 'row-del' : '') + '">' +
+        '<td><code>' + trNo + '</code></td>' +
+        '<td>' + esc(s.saledate) + '</td>' +
+        '<td><b>' + esc(custName) + '</b><span class="subline">' + esc(s.custno) + ' · sold by ' + esc(empName) + '</span></td>' +
+        '<td class="num">' + money(calc.total) + '</td>' +
+        '<td class="num">' + (s.is_deleted ? '<span class="dash">—</span>' : money(calc.balance)) + '</td>' +
+        '<td>' + paymentChip(calc, s.is_deleted) + '</td>' +
+        (a ? '<td><span class="pill ' + (s.is_deleted ? 'st-inactive">Inactive' : 'st-active">Active') + '</span>' + stamp(s.stamp) + '</td>' : '') +
+        '<td><div class="nowrap">' + acts + '</div></td>' +
+        '</tr>';
+    }).join('');
+
+    return '<div class="table-wrap"><table class="dense"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  }
+
+  function renderSalesView() {
+    var store = getSalesDataStore();
+    var a = adm();
+    var rows = filteredSales();
+    var totalPages = Math.max(1, Math.ceil(rows.length / V4.perPage));
+    if (V4.page > totalPages) V4.page = totalPages;
+
+    var activeCnt = D4.sales.filter(function (x) { return !x.is_deleted; }).length;
+    var inactiveCnt = D4.sales.filter(function (x) { return x.is_deleted; }).length;
+    var allCnt = D4.sales.length;
+
+    var tabsHtml = a
+      ? '<div class="tabs" role="group" aria-label="Filter sales">' +
+        [['active', 'Active (' + activeCnt + ')'], ['inactive', 'Inactive (' + inactiveCnt + ')'], ['all', 'All (' + allCnt + ')']].map(function (t) {
+          return '<button type="button" class="tab" aria-pressed="' + (V4.tab === t[0]) + '" data-s4="tab" data-a="' + t[0] + '">' + t[1] + '</button>';
+        }).join('') +
+        '</div>'
+      : '';
+
+    var paySel = '<select class="s4-select" id="s4-pay" aria-label="Filter by payment status">' +
+      [['all', 'All payments'], ['paid', 'Paid'], ['partial', 'Partial'], ['unpaid', 'Unpaid'], ['overpaid', 'Overpaid'], ['no lines', 'No lines']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (V4.payFilter === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('') +
+      '</select>';
+
+    var addBtn = can('sales:0')
+      ? '<button type="button" class="btn btn-primary" data-s4="new-sale">' + ic('plus', 18) + ' New Sale</button>'
+      : '';
+
+    var startIdx = rows.length ? (V4.page - 1) * V4.perPage + 1 : 0;
+    var endIdx = Math.min(rows.length, V4.page * V4.perPage);
+
+    var pagerHtml = rows.length
+      ? '<div class="pager"><span>Showing ' + startIdx + '–' + endIdx + ' of ' + rows.length + ' sales</span>' +
+        '<nav aria-label="Sales pages">' +
+        '<button type="button" class="pg" data-s4="pg" data-a="prev"' + (V4.page <= 1 ? ' disabled' : '') + '>Previous</button>' +
+        '<button type="button" class="pg" data-s4="pg" data-a="next"' + (V4.page >= totalPages ? ' disabled' : '') + '>Next</button>' +
+        '</nav></div>'
+      : '';
+
+    var inner = '<section class="s2-card" aria-label="Sales">' +
+      '<div><h2>Sales</h2><p class="s2-sub">' +
+      (a ? 'Every sale, including deleted ones. A sale\'s total is calculated from its lines and the prices on its date.' : 'Active sales only. The buttons you have depend on your rights.') +
+      '</p></div>' +
+      '<div class="s4-toolbar">' + tabsHtml +
+      '<div class="s4-filters">' + paySel +
+      '<div class="search">' + ic('search', 18) +
+      '<input id="s4-q" class="input" type="search" autocomplete="off" placeholder="Search sales..." aria-label="Search sales" value="' + esc(V4.q) + '">' +
+      '</div>' + addBtn + '</div></div>' +
+      '<div id="s4-sales-res">' + salesTableHtml(rows, store) + pagerHtml + '</div>' +
+      '</section>';
+
+    var main = document.querySelector('.main');
+    if (main) {
+      main.innerHTML = '<header class="header"><h1 id="focus" tabindex="-1">Sales Management</h1><div class="header-right">' + roleHeaderBadge() + '</div></header>' +
+        '<div class="content">' + inner + '</div>';
+    }
+    setActiveS4Nav('sales');
+    document.title = 'Sales Management — Hope, Inc. ERP';
+  }
+
+  /* ---------------- REPORTS (ALL 7 + PRINT/PDF) ---------------- */
+  function buildReportSheet(repId) {
+    var store = getSalesDataStore();
+    var f = V4.repFilters;
+    var genBy = S && S.me ? H.fullName(S.me) : 'System';
+    var genAt = ts();
+
+    var activeSales = D4.sales.filter(function (s) {
+      return !s.is_deleted && (!f.from || s.saledate >= f.from) && (!f.to || s.saledate <= f.to);
+    });
+    var activeSaleMap = {};
+    var periodGrandTotal = 0;
+    activeSales.forEach(function (s) {
+      var c = calcSale(s);
+      activeSaleMap[s.transno] = s;
+      periodGrandTotal += c.total;
+    });
+
+    var th = '', rowsHtml = '', totalRowHtml = '', footNote = '', rowCount = 0;
+
+    if (repId === 'top_customers') {
+      var mapC = {};
+      activeSales.forEach(function (s) {
+        var c = calcSale(s);
+        if (!mapC[s.custno]) {
+          mapC[s.custno] = { custno: s.custno, name: custLabel(s.custno, store), salesCount: 0, total: 0 };
+        }
+        mapC[s.custno].salesCount += 1;
+        mapC[s.custno].total += c.total;
+      });
+      var listC = Object.keys(mapC).map(function (k) { return mapC[k]; })
+        .sort(function (a, b) { return b.total - a.total; })
+        .slice(0, Math.max(1, Math.min(100, parseInt(f.topN, 10) || 5)));
+      var shownSum = listC.reduce(function (acc, r) { return acc + r.total; }, 0);
+      rowCount = listC.length;
+
+      th = '<th>RANK</th><th>CUST NO</th><th>CUSTOMER NAME</th><th class="num">SALES</th><th class="num">TOTAL SALES</th>';
+      rowsHtml = listC.map(function (r, idx) {
+        return '<tr><td>' + (idx + 1) + '</td><td><code>' + esc(r.custno) + '</code></td><td>' + esc(r.name) + '</td><td class="num">' + r.salesCount + '</td><td class="num">' + money(r.total) + '</td></tr>';
+      }).join('');
+      totalRowHtml = '<tr class="sheet-total-row"><td colspan="4">Total of the ' + rowCount + ' shown</td><td class="num">' + money(shownSum) + '</td></tr>';
+      footNote = 'All active sales from ' + esc(f.from || 'start') + ' to ' + esc(f.to || 'end') + ' add up to ' + money(periodGrandTotal) + '. The rows shown are ' + money(shownSum) + ' of that.';
+    } else if (repId === 'product_master') {
+      var prods = store.products.filter(function (p) { return !p.is_deleted; });
+      rowCount = prods.length;
+      th = '<th>PROD CODE</th><th>DESCRIPTION</th><th>UNIT</th><th class="num">CURRENT PRICE</th>';
+      rowsHtml = prods.map(function (p) {
+        var curPrice = priceOnDate(p.prodcode, today(), store.prices);
+        return '<tr><td><code>' + esc(p.prodcode) + '</code></td><td>' + esc(p.description) + '</td><td>' + esc(p.unit) + '</td><td class="num">' + (curPrice > 0 ? money(curPrice) : '—') + '</td></tr>';
+      }).join('');
+      footNote = 'Current price is the latest active price effective on or before ' + today() + '.';
+    } else if (repId === 'top_products') {
+      var mapP = {};
+      D4.lines.forEach(function (l) {
+        if (l.is_deleted || !activeSaleMap[l.transno]) return;
+        var sObj = activeSaleMap[l.transno];
+        var up = l.unitprice != null ? Number(l.unitprice) : priceOnDate(l.prodcode, sObj.saledate, store.prices);
+        var amt = (Number(l.qty) || 0) * up;
+        var pObj = store.products.filter(function (x) { return x.prodcode === l.prodcode; })[0];
+        if (!mapP[l.prodcode]) {
+          mapP[l.prodcode] = { prodcode: l.prodcode, desc: pObj ? pObj.description : l.prodcode, qty: 0, amount: 0 };
+        }
+        mapP[l.prodcode].qty += Number(l.qty) || 0;
+        mapP[l.prodcode].amount += amt;
+      });
+      var listP = Object.keys(mapP).map(function (k) { return mapP[k]; })
+        .sort(function (a, b) { return b.amount - a.amount; })
+        .slice(0, Math.max(1, Math.min(100, parseInt(f.topN, 10) || 5)));
+      var shownAmt = listP.reduce(function (acc, r) { return acc + r.amount; }, 0);
+      rowCount = listP.length;
+
+      th = '<th>RANK</th><th>PROD CODE</th><th>DESCRIPTION</th><th class="num">QTY SOLD</th><th class="num">AMOUNT</th>';
+      rowsHtml = listP.map(function (r, idx) {
+        return '<tr><td>' + (idx + 1) + '</td><td><code>' + esc(r.prodcode) + '</code></td><td>' + esc(r.desc) + '</td><td class="num">' + r.qty + '</td><td class="num">' + money(r.amount) + '</td></tr>';
+      }).join('');
+      totalRowHtml = '<tr class="sheet-total-row"><td colspan="4">Total of the ' + rowCount + ' shown</td><td class="num">' + money(shownAmt) + '</td></tr>';
+      footNote = 'All active sales from ' + esc(f.from || 'start') + ' to ' + esc(f.to || 'end') + ' add up to ' + money(periodGrandTotal) + '.';
+    } else if (repId === 'active_employees' || repId === 'all_employees') {
+      var emps = store.hr.emps.filter(function (e) {
+        return repId === 'all_employees' ? true : !e.sepdate;
+      });
+      rowCount = emps.length;
+      th = repId === 'all_employees'
+        ? '<th>EMP NO</th><th>NAME</th><th>JOB</th><th>DEPARTMENT</th><th>HIRED</th><th>SEPARATED</th>'
+        : '<th>EMP NO</th><th>NAME</th><th>JOB</th><th>DEPARTMENT</th><th>HIRED</th>';
+      rowsHtml = emps.map(function (e) {
+        var hRows = (store.hr.hist || []).filter(function (h) { return h.empno === e.empno && !h.del; })
+          .sort(function (a, b) { return a.effdate < b.effdate ? 1 : -1; });
+        var latest = hRows[0] || {};
+        var jObj = (store.hr.jobs || []).filter(function (j) { return j.jobcode === latest.jobcode; })[0];
+        var dObj = (store.hr.depts || []).filter(function (d) { return d.deptcode === latest.deptcode; })[0];
+        return '<tr><td><code>' + esc(e.empno) + '</code></td><td>' + esc(e.firstname + ' ' + e.lastname) + '</td>' +
+          '<td>' + esc(jObj ? jObj.jobdesc : (latest.jobcode || '—')) + '</td>' +
+          '<td>' + esc(dObj ? dObj.deptname : (latest.deptcode || '—')) + '</td>' +
+          '<td>' + esc(e.hiredate) + '</td>' +
+          (repId === 'all_employees' ? '<td>' + esc(e.sepdate || '—') + '</td>' : '') + '</tr>';
+      }).join('');
+      footNote = 'Employee count: ' + rowCount + '.';
+    } else if (repId === 'emp_history') {
+      var selEmp = store.hr.emps.filter(function (e) { return e.empno === f.empno; })[0] || store.hr.emps[0];
+      var histList = (store.hr.hist || []).filter(function (h) { return selEmp && h.empno === selEmp.empno && !h.del; })
+        .sort(function (a, b) { return a.effdate > b.effdate ? 1 : -1; });
+      rowCount = histList.length;
+      th = '<th>EFFECTIVE</th><th>JOB</th><th>DEPARTMENT</th><th class="num">SALARY (USD)</th><th>CHANGE</th>';
+      rowsHtml = histList.map(function (h, idx) {
+        var jObj = (store.hr.jobs || []).filter(function (j) { return j.jobcode === h.jobcode; })[0];
+        var dObj = (store.hr.depts || []).filter(function (d) { return d.deptcode === h.deptcode; })[0];
+        var chg = idx === 0 ? 'Joined' : (idx === histList.length - 1 ? 'Promotion (current)' : 'Update');
+        return '<tr><td>' + esc(h.effdate) + '</td><td>' + esc(jObj ? jObj.jobdesc : h.jobcode) + '</td>' +
+          '<td>' + esc(dObj ? dObj.deptname : h.deptcode) + '</td><td class="num">' + money(h.salary) + '</td><td>' + esc(chg) + '</td></tr>';
+      }).join('');
+      footNote = (selEmp ? (selEmp.firstname + ' ' + selEmp.lastname + ' · ' + selEmp.empno + ' · hired ' + selEmp.hiredate + '. ') : '') + 'Oldest row first.';
+    } else if (repId === 'top_sales') {
+      var salesRanked = activeSales.map(function (s) {
+        return { sale: s, calc: calcSale(s) };
+      }).sort(function (a, b) { return b.calc.total - a.calc.total; })
+        .slice(0, Math.max(1, Math.min(100, parseInt(f.topN, 10) || 5)));
+      var topSalesSum = salesRanked.reduce(function (acc, item) { return acc + item.calc.total; }, 0);
+      rowCount = salesRanked.length;
+
+      th = '<th>RANK</th><th>TRANS NO</th><th>DATE</th><th>CUSTOMER</th><th>SOLD BY</th><th class="num">TOTAL</th>';
+      rowsHtml = salesRanked.map(function (item, idx) {
+        return '<tr><td>' + (idx + 1) + '</td><td><code>' + esc(item.sale.transno) + '</code></td><td>' + esc(item.sale.saledate) + '</td>' +
+          '<td>' + esc(custLabel(item.sale.custno, store)) + '</td><td>' + esc(empLabel(item.sale.empno, store)) + '</td>' +
+          '<td class="num">' + money(item.calc.total) + '</td></tr>';
+      }).join('');
+      totalRowHtml = '<tr class="sheet-total-row"><td colspan="5">Total of the ' + rowCount + ' shown</td><td class="num">' + money(topSalesSum) + '</td></tr>';
+      footNote = 'All active sales from ' + esc(f.from || 'start') + ' to ' + esc(f.to || 'end') + ' add up to ' + money(periodGrandTotal) + '.';
+    }
+
+    var def = REPORTS_DEF.filter(function (r) { return r.id === repId; })[0] || REPORTS_DEF[0];
+    var criteriaText = (repId === 'top_customers' || repId === 'top_products' || repId === 'top_sales')
+      ? 'From ' + esc(f.from || 'start') + ' to ' + esc(f.to || 'end') + ' · Top ' + (parseInt(f.topN, 10) || 5)
+      : def.desc;
+
+    return '<div class="rep-sheet" id="s4-print-sheet">' +
+      '<div class="sheet-top"><div><div class="sheet-brand">HOPE, INC. ERP</div><h3>' + esc(def.name) + '</h3><div class="subline">' + criteriaText + '</div></div>' +
+      '<div class="sheet-meta">Generated by ' + esc(genBy) + '<br>' + esc(genAt) + '</div></div>' +
+      '<div class="table-wrap"><table class="dense"><thead><tr>' + th + '</tr></thead><tbody>' +
+      (rowsHtml || '<tr><td colspan="6" class="empty">No records for the selected criteria.</td></tr>') +
+      totalRowHtml + '</tbody></table></div>' +
+      '<div class="sheet-foot"><span>' + footNote + '</span><span>' + rowCount + ' rows · Hope, Inc. ERP</span></div>' +
+      '</div>';
+  }
+
+  function renderReportsView() {
+    var store = getSalesDataStore();
+    var currentDef = REPORTS_DEF.filter(function (r) { return r.id === V4.repId; })[0] || REPORTS_DEF[0];
+    if (!can(currentDef.right)) {
+      var firstAllowed = REPORTS_DEF.filter(function (r) { return can(r.right); })[0];
+      if (firstAllowed) {
+        V4.repId = firstAllowed.id;
+        currentDef = firstAllowed;
+      }
+    }
+
+    var leftList = '<aside class="rep-nav" aria-label="Reports list"><div class="rep-nav-title">REPORTS</div>' +
+      REPORTS_DEF.map(function (r) {
+        var allowed = can(r.right);
+        var active = r.id === V4.repId;
+        return '<button type="button" class="rep-item' + (active ? ' on' : '') + (!allowed ? ' locked' : '') + '"' +
+          (!allowed ? ' disabled title="Locked — requires ' + esc(r.name) + ' right"' : ' data-s4="rep-pick" data-a="' + r.id + '"') + '>' +
+          '<span>' + esc(r.name) + '</span>' + (!allowed ? ic('lock', 14) : '') + '</button>';
+      }).join('') + '</aside>';
+
+    var filterControls = '';
+    if (V4.repId === 'top_customers' || V4.repId === 'top_products' || V4.repId === 'top_sales') {
+      filterControls = '<div class="field"><label for="rf-from">From date</label><input class="input" id="rf-from" type="date" value="' + esc(V4.repFilters.from) + '"></div>' +
+        '<div class="field"><label for="rf-to">To date</label><input class="input" id="rf-to" type="date" value="' + esc(V4.repFilters.to) + '"></div>' +
+        '<div class="field"><label for="rf-topn">Top N</label><input class="input" id="rf-topn" type="number" min="1" max="100" value="' + esc(V4.repFilters.topN) + '"></div>';
+    } else if (V4.repId === 'emp_history') {
+      var empOpts = (store.hr.emps || []).map(function (e) {
+        var label = e.lastname + ', ' + e.firstname + ' (' + e.empno + ')';
+        return '<option value="' + esc(e.empno) + '"' + (V4.repFilters.empno === e.empno ? ' selected' : '') + '>' + esc(label) + '</option>';
+      }).join('');
+      filterControls = '<div class="field" style="flex:2 1 260px;"><label for="rf-emp">Employee</label><select class="s4-select" id="rf-emp" style="width:100%;">' + empOpts + '</select></div>';
+    }
+
+    var filterCard = '<section class="s2-card rep-card-controls">' +
+      '<div class="rep-head"><div><h2>' + esc(currentDef.name) + '</h2><p class="s2-sub">' + esc(currentDef.desc) + '</p></div>' +
+      '<div class="row"><button type="button" class="btn btn-outline" data-s4="print-rep">Print</button>' +
+      '<button type="button" class="btn btn-primary" data-s4="pdf-rep">Save as PDF</button></div></div>' +
+      '<div class="rep-filters">' + filterControls +
+      '<div class="field" style="flex:0 0 auto;"><button type="button" class="btn btn-primary" data-s4="run-rep">Run report</button></div>' +
+      '</div></section>';
+
+    var sheetHtml = V4.repRan ? buildReportSheet(V4.repId) : '';
+
+    var main = document.querySelector('.main');
+    if (main) {
+      main.innerHTML = '<header class="header"><h1 id="focus" tabindex="-1">Reports</h1><div class="header-right">' + roleHeaderBadge() + '</div></header>' +
+        '<div class="content"><div class="rep-layout">' + leftList + '<div class="rep-main">' + filterCard + sheetHtml + '</div></div></div>';
+    }
+    setActiveS4Nav('reports');
+    document.title = 'Reports — Hope, Inc. ERP';
+  }
+
+  /* ---------------- AUDIT LOG (ADMIN / SUPERADMIN ONLY) ---------------- */
+  function filteredAudit() {
+    var f = V4.auditFilters;
+    var byQ = f.by.trim().toLowerCase();
+    var recQ = f.record.trim().toLowerCase();
+
+    return D4.audit.filter(function (entry) {
+      if (f.table !== 'all' && entry.table !== f.table) return false;
+      if (f.action !== 'all' && entry.action !== f.action) return false;
+      if (byQ && String(entry.by || '').toLowerCase().indexOf(byQ) === -1) return false;
+      if (recQ && String(entry.record || '').toLowerCase().indexOf(recQ) === -1) return false;
+      var datePart = String(entry.when || '').slice(0, 10);
+      if (f.from && datePart < f.from) return false;
+      if (f.to && datePart > f.to) return false;
+      return true;
+    });
+  }
+
+  function renderAuditView() {
+    if (!adm()) {
+      renderSalesView();
+      toast('Audit Log is restricted to Admin and Superadmin accounts.', true);
+      return;
+    }
+
+    var f = V4.auditFilters;
+    var rows = filteredAudit();
+
+    var tbody = rows.length
+      ? rows.map(function (entry) {
+          var isOpen = f.expandedId === entry.id;
+          var diffHtml = '';
+          if (isOpen) {
+            var chgRows = (entry.changes && entry.changes.length ? entry.changes : [{ col: 'RECORD', before: '—', after: entry.record }])
+              .map(function (c) {
+                return '<tr><td><code>' + esc(c.col) + '</code></td><td>' + esc(c.before) + '</td><td><b>' + esc(c.after) + '</b></td></tr>';
+              }).join('');
+            diffHtml = '<tr class="audit-diff-row"><td colspan="6"><div class="diff-box"><table class="dense"><thead><tr><th>COLUMN</th><th>BEFORE</th><th>AFTER</th></tr></thead><tbody>' + chgRows + '</tbody></table></div></td></tr>';
+          }
+
+          return '<tr>' +
+            '<td>' + esc(entry.when) + '</td>' +
+            '<td><span class="pill st-none">' + esc(entry.action) + '</span></td>' +
+            '<td><code>' + esc(entry.table) + '</code></td>' +
+            '<td><code>' + esc(entry.record) + '</code></td>' +
+            '<td>' + esc(entry.by) + '</td>' +
+            '<td><button type="button" class="btn btn-outline btn-xs" data-s4="toggle-diff" data-a="' + entry.id + '">' + (isOpen ? 'Hide' : 'Changes') + '</button></td>' +
+            '</tr>' + diffHtml;
+        }).join('')
+      : '<tr><td colspan="6"><div class="s2-empty"><span class="icon-tile">' + ic('search', 24) + '</span>' +
+        '<h3>No entries match</h3><p>Change or clear the filters to see more of the log.</p>' +
+        '<button type="button" class="btn btn-outline" data-s4="clear-audit">Clear filters</button></div></td></tr>';
+
+    var card = '<section class="s2-card" aria-label="Audit log">' +
+      '<div><h2>Audit log</h2><p class="s2-sub">Every add, edit, delete and restore, newest first. The log is append-only: nobody can edit or remove an entry.</p></div>' +
+      '<div class="audit-filters">' +
+      '<div class="field"><label for="af-table">Table</label><select class="s4-select" id="af-table" style="width:100%;">' +
+      [['all', 'All tables'], ['sales', 'sales'], ['salesdetail', 'salesdetail'], ['payment', 'payment'], ['customer', 'customer'], ['product', 'product'], ['employee', 'employee']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (f.table === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('') + '</select></div>' +
+      '<div class="field"><label for="af-action">Action</label><select class="s4-select" id="af-action" style="width:100%;">' +
+      [['all', 'All actions'], ['ADD', 'ADD'], ['EDIT', 'EDIT'], ['DELETE', 'DELETE'], ['RESTORE', 'RESTORE']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (f.action === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('') + '</select></div>' +
+      '<div class="field"><label for="af-by">Done by</label><input class="input" id="af-by" placeholder="Name" value="' + esc(f.by) + '"></div>' +
+      '<div class="field"><label for="af-rec">Record</label><input class="input" id="af-rec" placeholder="e.g. TR000093" value="' + esc(f.record) + '"></div>' +
+      '<div class="field"><label for="af-from">From</label><input class="input" id="af-from" type="date" value="' + esc(f.from) + '"></div>' +
+      '<div class="field"><label for="af-to">To</label><input class="input" id="af-to" type="date" value="' + esc(f.to) + '"></div>' +
+      '</div>' +
+      '<div class="table-wrap"><table class="dense"><thead><tr><th>WHEN</th><th>ACTION</th><th>TABLE</th><th>RECORD</th><th>BY</th><th>DETAILS</th></tr></thead><tbody>' + tbody + '</tbody></table></div>' +
+      '<div class="pager"><span>Showing ' + rows.length + ' of ' + D4.audit.length + ' entries</span></div>' +
+      '</section>';
+
+    var main = document.querySelector('.main');
+    if (main) {
+      main.innerHTML = '<header class="header"><h1 id="focus" tabindex="-1">Audit Log</h1><div class="header-right">' + roleHeaderBadge() + '</div></header>' +
+        '<div class="content">' + card + '</div>';
+    }
+    setActiveS4Nav('audit');
+    document.title = 'Audit Log — Hope, Inc. ERP';
+  }
+
+  /* ---------------- SALE MODALS (NEW/EDIT SALE & SALE DETAILS) ---------------- */
+  function renderS4Modal() {
+    var host = document.getElementById('s4-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 's4-host';
+      document.body.appendChild(host);
+    }
+    var dlg = V4.dlg;
+    if (!dlg) {
+      host.innerHTML = '';
+      return;
+    }
+
+    var store = getSalesDataStore();
+
+    if (dlg.kind === 'saleForm') {
+      var isEdit = dlg.mode === 'edit';
+      var saleDateVal = dlg.vals.saledate || today();
+      var activeCusts = store.customers.filter(function (c) { return !c.is_deleted || c.custno === dlg.vals.custno; });
+      var eligibleEmps = (store.hr.emps || []).filter(function (e) {
+        if (e.empno === dlg.vals.empno) return true;
+        if (e.hiredate && e.hiredate > saleDateVal) return false;
+        if (e.sepdate && e.sepdate < saleDateVal) return false;
+        return true;
+      });
+
+      var errCount = Object.keys(dlg.errs || {}).length;
+      var errBanner = errCount
+        ? '<div class="msg msg-err" role="alert">' + ic('alert', 16) + ' Please fix ' + errCount + ' field' + (errCount > 1 ? 's' : '') + ' below.</div>'
+        : '';
+
+      host.innerHTML = '<div class="overlay" data-s4="overlay"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="s4-m-t">' +
+        '<div class="m-head"><div><h2 id="s4-m-t">' + (isEdit ? 'Edit Sale — ' + esc(dlg.vals.transno) : 'New Sale') + '</h2><div class="sub">Header of the sale</div></div>' +
+        '<button type="button" class="icon-btn" data-s4="close-dlg" aria-label="Close">' + ic('x', 18) + '</button></div>' +
+        '<form data-s4-saleform="1" novalidate><div class="m-body">' + errBanner +
+        '<div class="field"><label for="sf-no">Transaction no.</label><input class="input" id="sf-no" value="' + esc(dlg.vals.transno) + '" disabled><div class="hint">Numbered automatically, so two sales can never share a number.</div></div>' +
+        '<div class="field' + (dlg.errs.saledate ? ' err' : '') + '"><label for="sf-date">Sale date</label><input class="input" id="sf-date" type="date" value="' + esc(saleDateVal) + '"><div class="hint">Line prices are taken from this date.</div>' +
+        (dlg.errs.saledate ? '<div class="ferr">' + esc(dlg.errs.saledate) + '</div>' : '') + '</div>' +
+        '<div class="field' + (dlg.errs.custno ? ' err' : '') + '"><label for="sf-cust">Customer</label><select class="input" id="sf-cust"><option value="">Choose a customer...</option>' +
+        activeCusts.map(function (c) {
+          return '<option value="' + esc(c.custno) + '"' + (dlg.vals.custno === c.custno ? ' selected' : '') + '>' + esc(c.custname + ' (' + c.custno + ')') + '</option>';
+        }).join('') + '</select>' + (dlg.errs.custno ? '<div class="ferr">' + esc(dlg.errs.custno) + '</div>' : '') + '</div>' +
+        '<div class="field' + (dlg.errs.empno ? ' err' : '') + '"><label for="sf-emp">Sold by</label><select class="input" id="sf-emp"><option value="">Choose an employee...</option>' +
+        eligibleEmps.map(function (e) {
+          return '<option value="' + esc(e.empno) + '"' + (dlg.vals.empno === e.empno ? ' selected' : '') + '>' + esc(e.firstname + ' ' + e.lastname + ' (' + e.empno + ')') + '</option>';
+        }).join('') + '</select><div class="hint">Active employees hired on or before the sale date.</div>' +
+        (dlg.errs.empno ? '<div class="ferr">' + esc(dlg.errs.empno) + '</div>' : '') + '</div>' +
+        '</div><div class="m-foot"><span></span><div class="btns"><button type="button" class="btn btn-outline" data-s4="close-dlg">Cancel</button>' +
+        '<button type="submit" class="btn btn-primary">' + (isEdit ? 'Save changes' : 'Create sale') + '</button></div></div></form>' +
+        '</div></div>';
+      return;
+    }
+
+    if (dlg.kind === 'saleDetails') {
+      var saleObj = D4.sales.filter(function (s) { return s.transno === dlg.transno; })[0];
+      if (!saleObj) { host.innerHTML = ''; return; }
+      var calc = calcSale(saleObj);
+      var a = adm();
+      var subTab = dlg.subTab || 'lines';
+      var statusFilter = dlg.statusFilter || 'active';
+      var lockedByDelete = !!saleObj.is_deleted;
+
+      var allLines = D4.lines.filter(function (l) { return l.transno === saleObj.transno; });
+      var liveLines = allLines.filter(function (l) { return !l.is_deleted; });
+      var shownLines = a
+        ? allLines.filter(function (l) { return statusFilter === 'all' || (statusFilter === 'inactive') === !!l.is_deleted; })
+        : liveLines;
+
+      var allPays = D4.payments.filter(function (p) { return p.transno === saleObj.transno; });
+      var livePays = allPays.filter(function (p) { return !p.is_deleted; });
+      var shownPays = a
+        ? allPays.filter(function (p) { return statusFilter === 'all' || (statusFilter === 'inactive') === !!p.is_deleted; })
+        : livePays;
+
+      var balLabel = calc.balance < 0 ? 'OVERPAID BY' : 'BALANCE DUE';
+      var balVal = calc.balance < 0 ? money(Math.abs(calc.balance)) : money(calc.balance);
+
+      var addActionBtn = '';
+      if (!lockedByDelete) {
+        if (subTab === 'lines' && can('sales:4')) {
+          addActionBtn = '<button type="button" class="btn btn-primary btn-xs" data-s4="toggle-add-line">' + ic('plus', 16) + ' Add Line</button>';
+        } else if (subTab === 'payments' && can('sales:4')) {
+          addActionBtn = '<button type="button" class="btn btn-primary btn-xs" data-s4="toggle-add-pay">' + ic('plus', 16) + ' Record Payment</button>';
+        }
+      }
+
+      var addLinePanel = '';
+      if (dlg.showAddLine && !lockedByDelete) {
+        var availProds = store.products.filter(function (p) { return !p.is_deleted; });
+        var selProd = dlg.lineProd || '';
+        var selQty = dlg.lineQty || '';
+        var unitP = selProd ? priceOnDate(selProd, saleObj.saledate, store.prices) : 0;
+        var linePrev = (selProd && Number(selQty) > 0)
+          ? '<div class="live-preview">' + money(unitP) + ' each on ' + esc(saleObj.saledate) + ' · line total ' + money(Number(selQty) * unitP) + '</div>'
+          : '<div class="subline">Pick a product to see its price on ' + esc(saleObj.saledate) + '.</div>';
+
+        var lErrs = dlg.lineErrs || {};
+        var lErrKeys = Object.keys(lErrs);
+        addLinePanel = '<div class="sub-card"><h3>Add a product line</h3>' +
+          (lErrKeys.length ? '<div class="msg msg-err" role="alert">Please fix ' + lErrKeys.length + ' field' + (lErrKeys.length > 1 ? 's' : '') + ' below.</div>' : '') +
+          '<div class="two-col">' +
+          '<div class="field' + (lErrs.prod ? ' err' : '') + '"><label for="lf-prod">Product</label><select class="input" id="lf-prod"><option value="">Choose a product...</option>' +
+          availProds.map(function (p) {
+            var pr = priceOnDate(p.prodcode, saleObj.saledate, store.prices);
+            return '<option value="' + esc(p.prodcode) + '"' + (selProd === p.prodcode ? ' selected' : '') + '>' + esc(p.description + ' (' + p.prodcode + ') — ' + money(pr)) + '</option>';
+          }).join('') + '</select><div class="hint">Only active products with a price on ' + esc(saleObj.saledate) + ' are listed.</div>' +
+          (lErrs.prod ? '<div class="ferr">' + esc(lErrs.prod) + '</div>' : '') + '</div>' +
+          '<div class="field' + (lErrs.qty ? ' err' : '') + '"><label for="lf-qty">Quantity</label><input class="input" id="lf-qty" type="number" step="0.01" min="0" value="' + esc(selQty) + '">' +
+          (lErrs.qty ? '<div class="ferr">' + esc(lErrs.qty) + '</div>' : '') + '</div></div>' +
+          linePrev +
+          '<div class="row" style="justify-content:flex-end;"><button type="button" class="btn btn-outline btn-xs" data-s4="cancel-subform">Cancel</button>' +
+          '<button type="button" class="btn btn-primary btn-xs" data-s4="save-line">Add line</button></div></div>';
+      }
+
+      var addPayPanel = '';
+      if (dlg.showAddPay && !lockedByDelete) {
+        var defAmt = dlg.payAmt != null ? dlg.payAmt : (calc.balance > 0 ? calc.balance.toFixed(2) : '0.00');
+        var defDate = dlg.payDate != null ? dlg.payDate : today();
+        var pErrs = dlg.payErrs || {};
+        var pErrKeys = Object.keys(pErrs);
+        addPayPanel = '<div class="sub-card"><h3>Record a payment</h3>' +
+          (pErrKeys.length ? '<div class="msg msg-err" role="alert">Please fix ' + pErrKeys.length + ' field' + (pErrKeys.length > 1 ? 's' : '') + ' below.</div>' : '') +
+          '<div class="two-col">' +
+          '<div class="field' + (pErrs.date ? ' err' : '') + '"><label for="pf-date">Payment date</label><input class="input" id="pf-date" type="date" value="' + esc(defDate) + '">' +
+          (pErrs.date ? '<div class="ferr">' + esc(pErrs.date) + '</div>' : '') + '</div>' +
+          '<div class="field' + (pErrs.amt ? ' err' : '') + '"><label for="pf-amt">Amount (USD)</label><input class="input" id="pf-amt" type="number" step="0.01" value="' + esc(defAmt) + '">' +
+          '<div class="hint">Balance due ' + money(Math.max(0, calc.balance)) + '. A payment cannot be more than that.</div>' +
+          (pErrs.amt ? '<div class="ferr">' + esc(pErrs.amt) + '</div>' : '') + '</div></div>' +
+          '<div class="hint">The official receipt number (' + esc(nextOrNo()) + ') is assigned automatically.</div>' +
+          '<div class="row" style="justify-content:flex-end;"><button type="button" class="btn btn-outline btn-xs" data-s4="cancel-subform">Cancel</button>' +
+          '<button type="button" class="btn btn-primary btn-xs" data-s4="save-pay">Record payment</button></div></div>';
+      }
+
+      var tabBodyHtml = '';
+      if (subTab === 'lines') {
+        if (!shownLines.length) {
+          tabBodyHtml = '<div class="s2-empty"><span class="icon-tile">' + ic('box', 24) + '</span>' +
+            '<h3>No products on this sale yet</h3><p>Add product lines to calculate the sale total.</p></div>';
+        } else {
+          var lRows = shownLines.map(function (l) {
+            var pObj = store.products.filter(function (p) { return p.prodcode === l.prodcode; })[0];
+            var up = l.unitprice != null ? Number(l.unitprice) : priceOnDate(l.prodcode, saleObj.saledate, store.prices);
+            var lt = (Number(l.qty) || 0) * up;
+            var lAct = '';
+            if (!lockedByDelete) {
+              if (l.is_deleted && a) lAct = '<button type="button" class="btn btn-soft btn-xs" data-s4="restore-line" data-a="' + esc(l.prodcode) + '">Restore</button>';
+              else if (!l.is_deleted && can('sales:6')) lAct = '<button type="button" class="btn btn-danger btn-xs" data-s4="del-line" data-a="' + esc(l.prodcode) + '">Delete</button>';
+            }
+            return '<tr class="' + (l.is_deleted ? 'row-del' : '') + '">' +
+              '<td><code>' + esc(l.prodcode) + '</code></td>' +
+              '<td><b>' + esc(pObj ? pObj.description : l.prodcode) + '</b></td>' +
+              '<td class="num">' + esc(l.qty) + '</td>' +
+              '<td>' + esc(pObj ? pObj.unit : 'ea') + '</td>' +
+              '<td class="num">' + money(up) + '</td>' +
+              '<td class="num"><b>' + money(lt) + '</b></td>' +
+              (a ? '<td><span class="pill ' + (l.is_deleted ? 'st-inactive">Inactive' : 'st-active">Active') + '</span>' + stamp(l.stamp) + '</td>' : '') +
+              '<td><div class="nowrap">' + lAct + '</div></td></tr>';
+          }).join('');
+          tabBodyHtml = '<div class="table-wrap"><table class="dense"><thead><tr><th>PROD CODE</th><th>DESCRIPTION</th><th class="num">QTY</th><th>UNIT</th><th class="num">UNIT PRICE</th><th class="num">LINE TOTAL</th>' +
+            (a ? '<th>STATUS · CHANGE</th>' : '') + '<th>ACTIONS</th></tr></thead><tbody>' + lRows + '</tbody></table></div>';
+        }
+      } else {
+        if (!shownPays.length) {
+          tabBodyHtml = '<div class="s2-empty"><span class="icon-tile">' + ic('check', 24) + '</span>' +
+            '<h3>No payments yet</h3><p>Payments recorded against this sale appear here.</p></div>';
+        } else {
+          var pRows = shownPays.map(function (p) {
+            var pAct = '';
+            if (!lockedByDelete) {
+              if (p.is_deleted && a) pAct = '<button type="button" class="btn btn-soft btn-xs" data-s4="restore-pay" data-a="' + esc(p.orno) + '">Restore</button>';
+              else if (!p.is_deleted && can('sales:6')) pAct = '<button type="button" class="btn btn-danger btn-xs" data-s4="del-pay" data-a="' + esc(p.orno) + '">Delete</button>';
+            }
+            return '<tr class="' + (p.is_deleted ? 'row-del' : '') + '">' +
+              '<td><code>' + esc(p.orno) + '</code></td>' +
+              '<td>' + esc(p.paydate) + '</td>' +
+              '<td class="num"><b>' + money(p.amount) + '</b></td>' +
+              (a ? '<td><span class="pill ' + (p.is_deleted ? 'st-inactive">Inactive' : 'st-active">Active') + '</span>' + stamp(p.stamp) + '</td>' : '') +
+              '<td><div class="nowrap">' + pAct + '</div></td></tr>';
+          }).join('');
+          tabBodyHtml = '<div class="table-wrap"><table class="dense"><thead><tr><th>OR NO</th><th>DATE</th><th class="num">AMOUNT</th>' +
+            (a ? '<th>STATUS · CHANGE</th>' : '') + '<th>ACTIONS</th></tr></thead><tbody>' + pRows + '</tbody></table></div>';
+        }
+      }
+
+      var statusFilterBar = a
+        ? '<div class="tabs" role="group" aria-label="Filter items">' +
+          [['active', 'Active (' + (subTab === 'lines' ? liveLines.length : livePays.length) + ')'],
+           ['inactive', 'Inactive (' + (subTab === 'lines' ? allLines.length - liveLines.length : allPays.length - livePays.length) + ')'],
+           ['all', 'All (' + (subTab === 'lines' ? allLines.length : allPays.length) + ')']].map(function (t) {
+            return '<button type="button" class="tab" aria-pressed="' + (statusFilter === t[0]) + '" data-s4="subfilter" data-a="' + t[0] + '">' + t[1] + '</button>';
+          }).join('') + '</div>'
+        : '';
+
+      host.innerHTML = '<div class="overlay" data-s4="overlay"><div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="s4-m-t">' +
+        '<div class="m-head"><div><h2 id="s4-m-t">Sale Details — ' + esc(saleObj.transno) + '</h2><div class="sub">' + esc(custLabel(saleObj.custno, store) + ' · ' + saleObj.saledate) + '</div></div>' +
+        '<button type="button" class="icon-btn" data-s4="close-dlg" aria-label="Close">' + ic('x', 18) + '</button></div>' +
+        '<div class="m-body">' +
+        (lockedByDelete ? '<div class="msg msg-warn">This sale is deleted. Restore it from the list to change its lines or payments.</div>' : '') +
+        '<div class="sale-meta"><div><span>Customer</span><b>' + esc(custLabel(saleObj.custno, store)) + ' <span class="muted">' + esc(saleObj.custno) + '</span></b></div>' +
+        '<div><span>Sold by</span><b>' + esc(empLabel(saleObj.empno, store)) + '</b></div>' +
+        '<div><span>Date</span><b>' + esc(saleObj.saledate) + '</b></div></div>' +
+        '<div class="sum-tiles">' +
+        '<div class="sum-tile"><span class="k">TOTAL</span><span class="v">' + money(calc.total) + '</span></div>' +
+        '<div class="sum-tile"><span class="k">PAID</span><span class="v">' + money(calc.paid) + '</span></div>' +
+        '<div class="sum-tile' + (calc.balance < 0 ? ' overpaid' : '') + '"><span class="k">' + balLabel + '</span><span class="v">' + balVal + '</span>' +
+        '<div>' + paymentChip(calc, saleObj.is_deleted) + '</div></div>' +
+        '</div>' +
+        '<div class="p-top"><div class="tabs"><button type="button" class="tab" aria-pressed="' + (subTab === 'lines') + '" data-s4="subtab" data-a="lines">Lines (' + liveLines.length + ')</button>' +
+        '<button type="button" class="tab" aria-pressed="' + (subTab === 'payments') + '" data-s4="subtab" data-a="payments">Payments (' + livePays.length + ')</button></div>' +
+        addActionBtn + '</div>' +
+        statusFilterBar +
+        addLinePanel +
+        addPayPanel +
+        tabBodyHtml +
+        '</div>' +
+        '<div class="m-foot"><span class="hint">Total = quantity × unit price on ' + esc(saleObj.saledate) + '. Balance = total − payments.</span>' +
+        '<div class="btns"><button type="button" class="btn btn-primary" data-s4="close-dlg">Done</button></div></div>' +
+        '</div></div>';
+      return;
+    }
+
+    if (dlg.kind === 'confirm') {
+      var blocked = !!dlg.reason;
+      host.innerHTML = '<div class="overlay" data-s4="overlay"><div class="modal confirm" role="alertdialog" aria-modal="true" aria-labelledby="s4-m-t"><div class="m-body ctr">' +
+        '<span class="icon-tile ' + (blocked ? 'ic-amber' : 'ic-red') + '">' + ic('alert', 24) + '</span>' +
+        '<h2 id="s4-m-t">' + (blocked ? 'This sale cannot be deleted' : 'Delete this sale?') + '</h2>' +
+        '<span class="chipcode">' + esc(dlg.label) + '</span>' +
+        (blocked
+          ? '<div class="msg msg-err">' + esc(dlg.reason) + '</div>'
+          : '<p class="muted">It is hidden from Users and marked Inactive. You can restore it later.</p>') +
+        '<div class="row center">' +
+        (blocked
+          ? '<button type="button" class="btn btn-outline" data-s4="close-dlg">Close</button>'
+          : '<button type="button" class="btn btn-outline" data-s4="close-dlg">Cancel</button><button type="button" class="btn btn-red" data-s4="confirm-del-sale">Delete sale</button>') +
+        '</div></div></div></div>';
+    }
+  }
+
+  function submitSaleForm() {
+    var dlg = V4.dlg;
+    if (!dlg || dlg.kind !== 'saleForm') return;
+    var saledate = (document.getElementById('sf-date') || {}).value || '';
+    var custno = (document.getElementById('sf-cust') || {}).value || '';
+    var empno = (document.getElementById('sf-emp') || {}).value || '';
+    var errs = {};
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(saledate)) errs.saledate = 'Pick a valid sale date.';
+    if (!custno) errs.custno = 'Choose a customer.';
+    if (!empno) errs.empno = 'Choose the employee who made the sale.';
+
+    var store = getSalesDataStore();
+    var empObj = (store.hr.emps || []).filter(function (e) { return e.empno === empno; })[0];
+    if (empObj && saledate) {
+      if (empObj.hiredate && empObj.hiredate > saledate) {
+        errs.empno = 'Employee was not hired yet on ' + saledate + '.';
+      } else if (empObj.sepdate && empObj.sepdate < saledate) {
+        errs.empno = 'Employee separated before ' + saledate + '.';
+      }
+    }
+
+    if (Object.keys(errs).length) {
+      dlg.vals = { transno: dlg.vals.transno, saledate: saledate, custno: custno, empno: empno };
+      dlg.errs = errs;
+      renderS4Modal();
+      return;
+    }
+
+    var verb = dlg.mode === 'edit' ? 'EDIT' : 'ADD';
+    var stampStr = verb + ' ' + (S && S.me ? H.fullName(S.me) : 'system') + ' ' + ts();
+
+    if (dlg.mode === 'edit') {
+      var existing = D4.sales.filter(function (s) { return s.transno === dlg.vals.transno; })[0];
+      if (existing) {
+        var beforeCust = existing.custno, beforeEmp = existing.empno, beforeDate = existing.saledate;
+        existing.saledate = saledate;
+        existing.custno = custno;
+        existing.empno = empno;
+        existing.stamp = stampStr;
+        pushAudit('EDIT', 'sales', existing.transno, [
+          { col: 'SALEDATE', before: beforeDate, after: saledate },
+          { col: 'CUSTNO', before: beforeCust, after: custno },
+          { col: 'EMPNO', before: beforeEmp, after: empno }
+        ]);
+      }
+      toast('Sale ' + dlg.vals.transno + ' updated.');
+    } else {
+      var newSale = {
+        transno: dlg.vals.transno,
+        saledate: saledate,
+        custno: custno,
+        empno: empno,
+        is_deleted: false,
+        stamp: stampStr
+      };
+      D4.sales.unshift(newSale);
+      pushAudit('ADD', 'sales', newSale.transno, [
+        { col: 'CUSTNO', before: '—', after: custno },
+        { col: 'SALEDATE', before: '—', after: saledate }
+      ]);
+      toast('Sale ' + newSale.transno + ' created.');
+    }
+
+    saveS4();
+    V4.dlg = null;
+    renderS4Modal();
+    renderSalesView();
+  }
+
+  function saveSaleLine() {
+    var dlg = V4.dlg;
+    if (!dlg || dlg.kind !== 'saleDetails') return;
+    var saleObj = D4.sales.filter(function (s) { return s.transno === dlg.transno; })[0];
+    if (!saleObj) return;
+
+    var prodcode = (document.getElementById('lf-prod') || {}).value || '';
+    var qtyRaw = (document.getElementById('lf-qty') || {}).value || '';
+    var qty = Number(qtyRaw);
+    var errs = {};
+
+    if (!prodcode) {
+      errs.prod = 'Choose a product.';
+    } else {
+      var dup = D4.lines.filter(function (l) {
+        return l.transno === saleObj.transno && l.prodcode === prodcode && !l.is_deleted;
+      })[0];
+      if (dup) errs.prod = 'This sale already has an active line for ' + prodcode + '.';
+    }
+
+    if (!qtyRaw || isNaN(qty) || qty <= 0) {
+      errs.qty = 'Enter a quantity greater than 0.';
+    }
+
+    if (Object.keys(errs).length) {
+      dlg.lineProd = prodcode;
+      dlg.lineQty = qtyRaw;
+      dlg.lineErrs = errs;
+      renderS4Modal();
+      return;
+    }
+
+    var store = getSalesDataStore();
+    var up = priceOnDate(prodcode, saleObj.saledate, store.prices);
+    D4.lines.push({
+      transno: saleObj.transno,
+      prodcode: prodcode,
+      qty: Number(qty.toFixed(2)),
+      unitprice: up,
+      is_deleted: false,
+      stamp: 'ADD ' + (S && S.me ? H.fullName(S.me) : 'system') + ' ' + ts()
+    });
+    pushAudit('ADD', 'salesdetail', saleObj.transno + ' | ' + prodcode, [
+      { col: 'QUANTITY', before: '—', after: String(qty) },
+      { col: 'UNITPRICE', before: '—', after: money(up) }
+    ]);
+    saveS4();
+
+    dlg.showAddLine = false;
+    dlg.lineProd = '';
+    dlg.lineQty = '';
+    dlg.lineErrs = {};
+    renderS4Modal();
+    renderSalesView();
+    toast('Product line added.');
+  }
+
+  function saveSalePayment() {
+    var dlg = V4.dlg;
+    if (!dlg || dlg.kind !== 'saleDetails') return;
+    var saleObj = D4.sales.filter(function (s) { return s.transno === dlg.transno; })[0];
+    if (!saleObj) return;
+    var calc = calcSale(saleObj);
+
+    var payDate = (document.getElementById('pf-date') || {}).value || '';
+    var amtRaw = (document.getElementById('pf-amt') || {}).value || '';
+    var amt = Number(amtRaw);
+    var errs = {};
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(payDate)) {
+      errs.date = 'Enter a valid payment date.';
+    } else if (payDate > today()) {
+      errs.date = 'The payment date cannot be in the future.';
+    }
+
+    if (!amtRaw || isNaN(amt) || amt <= 0) {
+      errs.amt = 'Enter an amount greater than 0.';
+    } else if (amt > calc.balance + 0.0001) {
+      errs.amt = 'More than the balance due (' + money(calc.balance) + ').';
+    }
+
+    if (Object.keys(errs).length) {
+      dlg.payDate = payDate;
+      dlg.payAmt = amtRaw;
+      dlg.payErrs = errs;
+      renderS4Modal();
+      return;
+    }
+
+    var orno = nextOrNo();
+    D4.payments.push({
+      orno: orno,
+      transno: saleObj.transno,
+      paydate: payDate,
+      amount: Number(amt.toFixed(2)),
+      is_deleted: false,
+      stamp: 'ADD ' + (S && S.me ? H.fullName(S.me) : 'system') + ' ' + ts()
+    });
+    pushAudit('ADD', 'payment', orno, [
+      { col: 'TRANSNO', before: '—', after: saleObj.transno },
+      { col: 'AMOUNT', before: '—', after: money(amt) }
+    ]);
+    saveS4();
+
+    dlg.showAddPay = false;
+    dlg.payDate = '';
+    dlg.payAmt = null;
+    dlg.payErrs = {};
+    renderS4Modal();
+    renderSalesView();
+    toast('Payment ' + orno + ' recorded.');
+  }
+
+  /* ---------------- EVENT DELEGATION ---------------- */
+  document.addEventListener('click', function (e) {
+    var navBtn = e.target.closest('[data-s4-nav]');
+    if (navBtn) {
+      if (!S || !S.me) return;
+      var targetView = navBtn.getAttribute('data-s4-nav');
+      V4.view = targetView;
+      V4.dlg = null;
+      renderS4Modal();
+      if (targetView === 'sales') renderSalesView();
+      else if (targetView === 'reports') renderReportsView();
+      else if (targetView === 'audit') renderAuditView();
+      return;
+    }
+
+    var stubEl = e.target.closest('[data-act="stub"]');
+    if (stubEl && S && S.me) {
+      var arg = stubEl.getAttribute('data-arg');
+      if (arg === 'Sales') {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        V4.view = 'sales';
+        renderSalesView();
+        return;
+      }
+      if (arg === 'Reports') {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        V4.view = 'reports';
+        renderReportsView();
+        return;
+      }
+      if (arg === 'Audit Log') {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        V4.view = 'audit';
+        renderAuditView();
+        return;
+      }
+    }
+
+    var actEl = e.target.closest('[data-s4]');
+    if (!actEl) return;
+    var act = actEl.getAttribute('data-s4');
+    var a = actEl.getAttribute('data-a');
+
+    if (act === 'overlay' && e.target !== actEl) return;
+
+    switch (act) {
+      case 'overlay':
+      case 'close-dlg':
+        V4.dlg = null;
+        renderS4Modal();
+        break;
+      case 'tab':
+        V4.tab = a;
+        V4.page = 1;
+        renderSalesView();
+        break;
+      case 'pg':
+        if (a === 'prev' && V4.page > 1) V4.page--;
+        else if (a === 'next') V4.page++;
+        renderSalesView();
+        break;
+      case 'clear-sales':
+        V4.q = '';
+        V4.payFilter = 'all';
+        V4.page = 1;
+        renderSalesView();
+        break;
+      case 'new-sale':
+        if (!can('sales:0')) return toast('You do not have permission to create sales.', true);
+        V4.dlg = { kind: 'saleForm', mode: 'add', vals: { transno: nextTransNo(), saledate: today(), custno: '', empno: '' }, errs: {} };
+        renderS4Modal();
+        break;
+      case 'edit-sale':
+        if (!can('sales:1')) return toast('You do not have permission to edit sales.', true);
+        var edS = D4.sales.filter(function (x) { return x.transno === a; })[0];
+        if (edS) {
+          V4.dlg = { kind: 'saleForm', mode: 'edit', vals: { transno: edS.transno, saledate: edS.saledate, custno: edS.custno, empno: edS.empno }, errs: {} };
+          renderS4Modal();
+        }
+        break;
+      case 'del-sale':
+        if (!can('sales:2')) return toast('You do not have permission to delete sales.', true);
+        var activeL = D4.lines.filter(function (l) { return l.transno === a && !l.is_deleted; }).length;
+        var activeP = D4.payments.filter(function (p) { return p.transno === a && !p.is_deleted; }).length;
+        var reason = '';
+        if (activeL || activeP) {
+          var parts = [];
+          if (activeL) parts.push(activeL + ' active line' + (activeL > 1 ? 's' : ''));
+          if (activeP) parts.push(activeP + ' active payment' + (activeP > 1 ? 's' : ''));
+          reason = 'Cannot delete this sale while ' + parts.join(' and ') + ' still exist.';
+        }
+        V4.dlg = { kind: 'confirm', transno: a, label: a, reason: reason };
+        renderS4Modal();
+        break;
+      case 'confirm-del-sale':
+        var delS = D4.sales.filter(function (x) { return x.transno === V4.dlg.transno; })[0];
+        if (delS) {
+          delS.is_deleted = true;
+          delS.stamp = 'DELETE ' + (S && S.me ? H.fullName(S.me) : 'system') + ' ' + ts();
+          pushAudit('DELETE', 'sales', delS.transno, [{ col: 'STATUS', before: 'Active', after: 'Inactive' }]);
+          saveS4();
+          toast('Sale ' + delS.transno + ' marked Inactive.');
+        }
+        V4.dlg = null;
+        renderS4Modal();
+        renderSalesView();
+        break;
+      case 'restore-sale':
+        var resS = D4.sales.filter(function (x) { return x.transno === a; })[0];
+        if (resS) {
+          resS.is_deleted = false;
+          resS.stamp = 'RESTORE ' + (S && S.me ? H.fullName(S.me) : 'system') + ' ' + ts();
+          pushAudit('RESTORE', 'sales', resS.transno, [{ col: 'STATUS', before: 'Inactive', after: 'Active' }]);
+          saveS4();
+          toast('Sale ' + resS.transno + ' restored.');
+          renderSalesView();
+        }
+        break;
+      case 'details':
+        V4.dlg = { kind: 'saleDetails', transno: a, subTab: 'lines', statusFilter: 'active', showAddLine: false, showAddPay: false, lineErrs: {}, payErrs: {} };
+        renderS4Modal();
+        break;
+      case 'subtab':
+        if (V4.dlg && V4.dlg.kind === 'saleDetails') {
+          V4.dlg.subTab = a;
+          V4.dlg.showAddLine = false;
+          V4.dlg.showAddPay = false;
+          renderS4Modal();
+        }
+        break;
+      case 'subfilter':
+        if (V4.dlg && V4.dlg.kind === 'saleDetails') {
+          V4.dlg.statusFilter = a;
+          renderS4Modal();
+        }
+        break;
+      case 'toggle-add-line':
+        if (V4.dlg && V4.dlg.kind === 'saleDetails') {
+          V4.dlg.showAddLine = !V4.dlg.showAddLine;
+          V4.dlg.lineErrs = {};
+          renderS4Modal();
+        }
+        break;
+      case 'toggle-add-pay':
+        if (V4.dlg && V4.dlg.kind === 'saleDetails') {
+          V4.dlg.showAddPay = !V4.dlg.showAddPay;
+          V4.dlg.payErrs = {};
+          renderS4Modal();
+        }
+        break;
+      case 'cancel-subform':
+        if (V4.dlg && V4.dlg.kind === 'saleDetails') {
+          V4.dlg.showAddLine = false;
+          V4.dlg.showAddPay = false;
+          V4.dlg.lineErrs = {};
+          V4.dlg.payErrs = {};
+          renderS4Modal();
+        }
+        break;
+      case 'save-line':
+        saveSaleLine();
+        break;
+      case 'save-pay':
+        saveSalePayment();
+        break;
+      case 'del-line':
+        if (V4.dlg && V4.dlg.kind === 'saleDetails') {
+          var ln = D4.lines.filter(function (x) { return x.transno === V4.dlg.transno && x.prodcode === a && !x.is_deleted; })[0];
+          if (ln) {
+            ln.is_deleted = true;
+            ln.stamp = 'DELETE ' + (S && S.me ? H.fullName(S.me) : 'system') + ' ' + ts();
+            pushAudit('DELETE', 'salesdetail', V4.dlg.transno + ' | ' + a, [{ col: 'STATUS', before: 'Active', after: 'Inactive' }]);
+            saveS4();
+            renderS4Modal();
+            renderSalesView();
+            toast('Line removed.');
+          }
+        }
+        break;
+      case 'restore-line':
+        if (V4.dlg && V4.dlg.kind === 'saleDetails') {
+          var rln = D4.lines.filter(function (x) { return x.transno === V4.dlg.transno && x.prodcode === a && x.is_deleted; })[0];
+          if (rln) {
+            rln.is_deleted = false;
+            rln.stamp = 'RESTORE ' + (S && S.me ? H.fullName(S.me) : 'system') + ' ' + ts();
+            pushAudit('RESTORE', 'salesdetail', V4.dlg.transno + ' | ' + a, [{ col: 'STATUS', before: 'Inactive', after: 'Active' }]);
+            saveS4();
+            renderS4Modal();
+            renderSalesView();
+            toast('Line restored.');
+          }
+        }
+        break;
+      case 'del-pay':
+        if (V4.dlg && V4.dlg.kind === 'saleDetails') {
+          var py = D4.payments.filter(function (x) { return x.transno === V4.dlg.transno && x.orno === a && !x.is_deleted; })[0];
+          if (py) {
+            py.is_deleted = true;
+            py.stamp = 'DELETE ' + (S && S.me ? H.fullName(S.me) : 'system') + ' ' + ts();
+            pushAudit('DELETE', 'payment', a, [{ col: 'STATUS', before: 'Active', after: 'Inactive' }]);
+            saveS4();
+            renderS4Modal();
+            renderSalesView();
+            toast('Payment ' + a + ' deleted.');
+          }
+        }
+        break;
+      case 'restore-pay':
+        if (V4.dlg && V4.dlg.kind === 'saleDetails') {
+          var rpy = D4.payments.filter(function (x) { return x.transno === V4.dlg.transno && x.orno === a && x.is_deleted; })[0];
+          if (rpy) {
+            rpy.is_deleted = false;
+            rpy.stamp = 'RESTORE ' + (S && S.me ? H.fullName(S.me) : 'system') + ' ' + ts();
+            pushAudit('RESTORE', 'payment', a, [{ col: 'STATUS', before: 'Inactive', after: 'Active' }]);
+            saveS4();
+            renderS4Modal();
+            renderSalesView();
+            toast('Payment ' + a + ' restored.');
+          }
+        }
+        break;
+      case 'rep-pick':
+        V4.repId = a;
+        V4.repRan = true;
+        renderReportsView();
+        break;
+      case 'run-rep':
+        if (document.getElementById('rf-from')) V4.repFilters.from = document.getElementById('rf-from').value;
+        if (document.getElementById('rf-to')) V4.repFilters.to = document.getElementById('rf-to').value;
+        if (document.getElementById('rf-topn')) V4.repFilters.topN = parseInt(document.getElementById('rf-topn').value, 10) || 5;
+        if (document.getElementById('rf-emp')) V4.repFilters.empno = document.getElementById('rf-emp').value;
+        V4.repRan = true;
+        renderReportsView();
+        break;
+      case 'print-rep':
+      case 'pdf-rep':
+        window.print();
+        break;
+      case 'toggle-diff':
+        var numId = parseInt(a, 10);
+        V4.auditFilters.expandedId = (V4.auditFilters.expandedId === numId) ? null : numId;
+        renderAuditView();
+        break;
+      case 'clear-audit':
+        V4.auditFilters = { table: 'all', action: 'all', by: '', record: '', from: '', to: '', expandedId: null };
+        renderAuditView();
+        break;
+    }
+  });
+
+  document.addEventListener('submit', function (e) {
+    if (e.target.closest('[data-s4-saleform]')) {
+      e.preventDefault();
+      submitSaleForm();
+    }
+  });
+
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.id === 's4-pay') {
+      V4.payFilter = t.value;
+      V4.page = 1;
+      renderSalesView();
+    } else if (t.id === 'lf-prod' && V4.dlg && V4.dlg.kind === 'saleDetails') {
+      V4.dlg.lineProd = t.value;
+      var qEl = document.getElementById('lf-qty');
+      if (qEl) V4.dlg.lineQty = qEl.value;
+      renderS4Modal();
+    } else if (t.id === 'af-table' || t.id === 'af-action' || t.id === 'af-from' || t.id === 'af-to') {
+      V4.auditFilters.table = (document.getElementById('af-table') || {}).value || 'all';
+      V4.auditFilters.action = (document.getElementById('af-action') || {}).value || 'all';
+      V4.auditFilters.from = (document.getElementById('af-from') || {}).value || '';
+      V4.auditFilters.to = (document.getElementById('af-to') || {}).value || '';
+      renderAuditView();
+    }
+  });
+
+  document.addEventListener('input', function (e) {
+    var t = e.target;
+    if (t.id === 's4-q') {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () {
+        V4.q = t.value;
+        V4.page = 1;
+        renderSalesView();
+        var reInput = document.getElementById('s4-q');
+        if (reInput) {
+          reInput.focus();
+          reInput.setSelectionRange(reInput.value.length, reInput.value.length);
+        }
+      }, 200);
+    } else if (t.id === 'lf-qty' && V4.dlg && V4.dlg.kind === 'saleDetails') {
+      V4.dlg.lineQty = t.value;
+    } else if (t.id === 'af-by' || t.id === 'af-rec') {
+      V4.auditFilters.by = (document.getElementById('af-by') || {}).value || '';
+      V4.auditFilters.record = (document.getElementById('af-rec') || {}).value || '';
+      renderAuditView();
+    }
+  });
+
+  /* Inject Sprint 4 sidebar links whenever dashboard or user management renders */
+  var obs = new MutationObserver(function () {
+    if (S && S.me && document.querySelector('.side')) {
+      syncSidebarNav();
+    }
+  });
+  obs.observe(document.body, { childList: true, subtree: true });
+})(window);
 })(window);
 
