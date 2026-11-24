@@ -3711,4 +3711,4 @@ function syncSidebarNav() {
   window.addEventListener('beforeunload', function () {
     clearInterval(navTimer);
   });
-})(window);
+})
