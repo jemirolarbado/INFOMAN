@@ -2504,6 +2504,20 @@ function syncSidebarNav() {
   }
 }
 
+  function setActiveS4Nav(activeKey) {
+  syncSidebarNav();
+
+  Array.prototype.forEach.call(document.querySelectorAll('.side .nav'), function(btn) {
+    var s4k = btn.getAttribute('data-s4-nav');
+    var on = !!activeKey && s4k === activeKey;
+
+    btn.classList.toggle('on', on);
+
+    if (on) btn.setAttribute('aria-current', 'page');
+    else if (s4k) btn.removeAttribute('aria-current');
+  });
+}
+
     var salesBtn = document.createElement('button');
     salesBtn.type = 'button';
     salesBtn.className = 'nav';
