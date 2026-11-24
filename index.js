@@ -3691,7 +3691,9 @@ function roleHeaderBadge() {
     }
   }, 400);
 
-  window.addEventListener('beforeunload', function () {
+    window.addEventListener('beforeunload', function () {
     clearInterval(navTimer);
   });
-})
+})(window);
+
+})(window);
