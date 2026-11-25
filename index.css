@@ -1079,3 +1079,61 @@ table.dense td {
     box-shadow: none !important;
   }
 }
+
+/* --- Rights Checklist Modal --- */
+.modal-lg {
+  max-width: 720px;
+  width: 94%;
+}
+
+.right-group {
+  border: 1px solid #d9e2e0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: #f9fbfb;
+}
+
+.right-group:last-child {
+  margin-bottom: 0;
+}
+
+.right-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #e3ebe9;
+  font-size: 0.95rem;
+  color: #10201e;
+}
+
+.right-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px 14px;
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: #243835;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.check-item:hover {
+  background: #eef4f3;
+}
+
+.check-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #0b6e64;
+  margin: 0;
+  flex-shrink: 0;
+}
