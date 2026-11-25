@@ -482,7 +482,13 @@
     if (!target) return '';
 
     if (type === 'myrights') {
-      return modalShell('My Rights (' + (target.rights || []).length + ' of ' + H.TOTAL_RIGHTS + ')', '', rightsChecklist(target, false));
+      return '' +
+        '<div class="overlay" data-act="overlay">' +
+          '<div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
+            '<div class="modal-head"><h2 id="modal-title">My Rights (' + (target.rights || []).length + ' of ' + H.TOTAL_RIGHTS + ')</h2><button type="button" class="btn-icon" data-act="close" aria-label="Close">' + ic('x', 18) + '</button></div>' +
+            '<div class="modal-body">' + rightsChecklist(target, false) + '</div>' +
+            '<div class="modal-foot"><span class="muted">Granted by your role and Admin permissions</span><button type="button" class="btn btn-outline" data-act="close">Close</button></div>' +
+          '</div></div>';
     }
 
     if (type === 'edit') {
